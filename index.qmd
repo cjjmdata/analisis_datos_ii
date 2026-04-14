@@ -1,0 +1,38 @@
+---
+title: "Análisis de Datos II"
+subtitle: "Estadística inferencial y modelado para la toma de decisiones"
+lang: es
+---
+
+Este sitio reúne las **presentaciones, casos y recursos** del curso Análisis de Datos II (MAT2409). El enfoque combina los temas del programa oficial con una postura clara: en la era de la IA, el valor del analista no está en ejecutar cálculos, sino en **formular buenas preguntas, verificar resultados y comunicar decisiones bajo incertidumbre**.
+
+## Cómo usar este sitio
+
+**[Presentaciones](slides/index.qmd)** · cada sesión del curso tiene su presentación con código y resultados en pestañas separadas para facilitar el estudio y la replicación en su notebook.
+
+**[Recursos](recursos/index.qmd)** · bibliografía, guías de uso de R, y la guía sobre cómo usar IA responsablemente en este curso.
+
+**[Auditorías](auditorias/index.qmd)** · análisis defectuosos para practicar el pensamiento crítico. Son el núcleo de la evaluación AI-era del curso.
+
+**[Postura sobre IA](postura-ia.qmd)** · lo que se puede y no se puede hacer con herramientas de IA en los entregables. Lectura obligatoria antes de la primera evaluación.
+
+## El parcial en curso
+
+El Parcial 3 trabaja sobre un caso longitudinal: **la consultora de análisis que ustedes integran debe ayudar a Patricia, una clienta que heredó un departamento en Roma Norte, a tomar decisiones fundamentadas sobre su listing en Airbnb.**
+
+Cada sesión agrega una capa al análisis:
+
+1. Validación de una afirmación del mercado
+2. Comparación entre opciones de listado
+3. Comparación entre alcaldías
+4. Auditoría de un análisis externo
+5. Modelado del precio
+6. Diagnóstico y rangos de confianza
+7. Modelo con múltiples factores
+8. Presentación ejecutiva y defensa
+
+Los datos provienen de [Inside Airbnb](https://insideairbnb.com/), corte del 27 de septiembre de 2025, bajo licencia Creative Commons.
+
+## Aviso importante sobre este sitio
+
+Este sitio contiene **únicamente materiales docentes de consulta**. Todo lo relativo a entregas, calificaciones, fechas, evaluaciones y comunicación con el grupo se administra exclusivamente por Brightspace.

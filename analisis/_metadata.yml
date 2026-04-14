@@ -1,0 +1,9 @@
+# Los archivos en esta carpeta son notebooks internos de validación.
+# No forman parte del sitio público.
+# Se ejecutan localmente para:
+#   1. Validar que el código de las slides corre sin errores
+#   2. Obtener números reales que alimentan la narrativa de las slides
+#   3. Servir como "modelo de respuesta" compartible con alumnos tras la sesión
+#
+# Esta configuración previene el render automático como parte del sitio.
+draft: true

@@ -1,0 +1,482 @@
+---
+title: "Pruebas de hipótesis: comparaciones"
+subtitle: "Sesión 2 · Parcial 3 · Análisis de Datos II"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "Análisis de Datos II — Sesión 2 · 2.2–2.3 Pruebas de una y dos muestras"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+listings <- readRDS("../../datos/listings_cdmx.rds")
+
+# Subsets que usaremos a lo largo de la sesión
+roma_norte <- listings |>
+  filter(alcaldia == "Roma Norte")
+
+roma_prop  <- roma_norte |> filter(tipo_habitacion == "Propiedad completa")
+roma_cuarto <- roma_norte |> filter(tipo_habitacion == "Cuarto privado")
+
+condesa <- listings |> filter(alcaldia == "Condesa")
+
+theme_curso <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+```
+
+# Recapitulación {background-color="#2C3E50"}
+
+## La sesión pasada, con [Patricia]{.patricia}
+
+Validamos una afirmación del mercado sobre el precio promedio en Roma Norte usando una **prueba t de una muestra**.
+
+Herramientas que adquirimos:
+
+- $H_0$, $H_1$, $\alpha$, p-valor
+- Decisión estadística basada en evidencia
+- Comunicación profesional con intervalo de confianza
+
+## Hoy: Patricia tiene más preguntas
+
+> *"Gracias por aclarar lo de los \$1,800. Ahora necesito decidir cómo listar. Tres cosas me quitan el sueño:*
+>
+> 1. *¿Cobro más rentando el depto completo o solo un cuarto privado?*
+> 2. *¿Qué tan importante es ser 'superhost' en cuanto a precio?*
+> 3. *¿La proporción de superhosts es similar entre Roma Norte y Condesa?"*
+
+# Tabla de decisión {background-color="#18BC9C"}
+
+## ¿Qué prueba usar?
+
+Cada pregunta requiere una prueba distinta. **La primera decisión no es cuál prueba — es cuál pregunta.**
+
+| Situación | Pregunta | Prueba |
+|:---|:---|:---|
+| Una muestra, una media | ¿μ = valor fijo? | t una muestra *(S1)* |
+| Una muestra, una proporción | ¿p = valor fijo? | z una proporción |
+| Dos grupos independientes, medias | ¿μ₁ = μ₂? | t dos muestras |
+| Dos grupos independientes, proporciones | ¿p₁ = p₂? | z dos proporciones |
+| Mediciones pareadas | ¿μdif = 0? | t pareada |
+
+## El patrón común
+
+Todas estas pruebas siguen **el mismo framework** de la sesión 1:
+
+1. Traducir pregunta de negocio → $H_0$, $H_1$
+2. Elegir nivel de significancia $\alpha$
+3. Verificar supuestos
+4. Ejecutar la prueba
+5. Interpretar en contexto de negocio
+
+Cambia el estadístico; no el pensamiento.
+
+# Pregunta 1: Completo vs. Cuarto {background-color="#2C3E50"}
+
+## La pregunta de Patricia
+
+> "¿Cobro más rentando el depto completo o solo un cuarto privado?"
+
+Traducción analítica:
+
+$$H_0: \mu_{completo} = \mu_{cuarto}$$
+$$H_1: \mu_{completo} \neq \mu_{cuarto}$$
+
+**Dos muestras independientes** porque son dos grupos de propiedades diferentes.
+
+## Exploración de los dos grupos
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+roma_norte |>
+  filter(tipo_habitacion %in%
+         c("Propiedad completa", "Cuarto privado")) |>
+  group_by(tipo_habitacion) |>
+  summarise(
+    n        = n(),
+    media    = mean(precio),
+    mediana  = median(precio),
+    desv_est = sd(precio)
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+roma_norte |>
+  filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")) |>
+  group_by(tipo_habitacion) |>
+  summarise(
+    n        = n(),
+    media    = round(mean(precio), 0),
+    mediana  = round(median(precio), 0),
+    desv_est = round(sd(precio), 0)
+  ) |>
+  knitr::kable(
+    col.names = c("Tipo", "n", "Media", "Mediana", "Desv. est."),
+    format.args = list(big.mark = ",")
+  )
+```
+
+:::
+
+## Visualización de la comparación
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+roma_norte |>
+  filter(tipo_habitacion %in%
+         c("Propiedad completa", "Cuarto privado")) |>
+  ggplot(aes(x = tipo_habitacion, y = precio,
+             fill = tipo_habitacion)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = label_comma(),
+                     limits = c(0, 5000)) +
+  scale_fill_manual(values = c("#18BC9C", "#3498DB")) +
+  labs(x = NULL, y = "Precio (MXN por noche)",
+       title = "Precio por tipo en Roma Norte") +
+  theme(legend.position = "none")
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+roma_norte |>
+  filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")) |>
+  ggplot(aes(x = tipo_habitacion, y = precio, fill = tipo_habitacion)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 5000)) +
+  scale_fill_manual(values = c("#18BC9C", "#3498DB")) +
+  labs(x = NULL, y = "Precio (MXN por noche)",
+       title = "Precio por tipo de habitación en Roma Norte",
+       subtitle = "Inside Airbnb · corte 2025-09-27") +
+  theme_curso() +
+  theme(legend.position = "none")
+```
+
+:::
+
+## Un detalle crítico: ¿varianzas iguales?
+
+La prueba t de dos muestras tiene dos variantes:
+
+- **Welch** (default en R): no supone varianzas iguales
+- **Pooled** (`var.equal = TRUE`): supone varianzas iguales
+
+::: {.callout-important}
+**Usa Welch por default.** Es más robusta y casi siempre apropiada. El pooled es una optimización que rara vez vale la pena en la práctica.
+:::
+
+## Ejecución de la prueba
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+t.test(
+  precio ~ tipo_habitacion,
+  data = roma_norte |>
+    filter(tipo_habitacion %in%
+           c("Propiedad completa", "Cuarto privado")),
+  alternative = "two.sided",
+  conf.level  = 0.95
+)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+t.test(
+  precio ~ tipo_habitacion,
+  data = roma_norte |>
+    filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")),
+  alternative = "two.sided",
+  conf.level  = 0.95
+)
+```
+
+:::
+
+## Interpretación para Patricia
+
+Plantilla profesional:
+
+::: {.callout-note appearance="minimal"}
+**Hallazgo.** Rentar el depto completo genera, en promedio, un precio por noche mayor que rentar un cuarto privado en Roma Norte. La diferencia es estadísticamente significativa.
+
+**Traducción a decisión.** Su depto de 2 recámaras, listado completo, cobra *en promedio* una cantidad sensiblemente mayor que si lo divide en cuartos privados. Sin embargo, la decisión de negocio depende también de: ocupación esperada en cada modalidad, costos operativos, y sus preferencias personales sobre compartir espacio.
+
+**Lo que este análisis NO dice**: cuál modalidad deja más ingreso total anual. Precio × ocupación es una cuenta distinta que veremos más adelante.
+:::
+
+# Pregunta 2: Superhost {background-color="#18BC9C"}
+
+## Primera parte: ¿qué proporción del mercado?
+
+Antes de preguntarse "¿debo ser superhost?", Patricia quiere saber:
+
+> "¿Qué proporción del mercado en Roma Norte son superhosts?"
+
+Esto es una **prueba de una proporción**: $H_0: p = 0.3$ (por decir, la mitad del mercado).
+
+## Ejecución: una proporción
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+# Contar superhosts en Roma Norte
+conteo <- roma_norte |>
+  count(superhost) |>
+  mutate(prop = n / sum(n))
+
+print(conteo)
+
+# Prueba: ¿la proporción es igual a 0.30?
+n_super <- sum(roma_norte$superhost == "Superhost",
+               na.rm = TRUE)
+n_total <- sum(!is.na(roma_norte$superhost))
+
+prop.test(x = n_super, n = n_total, p = 0.30,
+          alternative = "two.sided")
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+conteo <- roma_norte |>
+  count(superhost) |>
+  mutate(prop = round(n / sum(n), 3))
+knitr::kable(conteo, col.names = c("Categoría", "n", "Proporción"))
+```
+
+```{r}
+#| echo: false
+n_super <- sum(roma_norte$superhost == "Superhost", na.rm = TRUE)
+n_total <- sum(!is.na(roma_norte$superhost))
+prop.test(x = n_super, n = n_total, p = 0.30, alternative = "two.sided")
+```
+
+:::
+
+## Segunda parte: ¿los superhosts cobran más?
+
+Ahora la pregunta de fondo:
+
+$$H_0: \mu_{superhost} = \mu_{no\_super}$$
+$$H_1: \mu_{superhost} \neq \mu_{no\_super}$$
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+t.test(
+  precio ~ superhost,
+  data = roma_prop |> filter(!is.na(superhost)),
+  alternative = "two.sided"
+)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+t.test(
+  precio ~ superhost,
+  data = roma_prop |> filter(!is.na(superhost)),
+  alternative = "two.sided"
+)
+```
+
+:::
+
+## Advertencia crítica sobre la interpretación
+
+::: {.callout-warning}
+Si la prueba dice que los superhosts cobran más, **NO significa que ser superhost cause un precio mayor**. Puede ser que los hosts con propiedades mejores (más grandes, mejor ubicadas) tengan más probabilidad de volverse superhosts.
+
+Esta es la distinción **correlación vs. causalidad** que retomaremos en regresión múltiple (sesión 7). Por ahora, lo honesto es decir: "los superhosts están asociados con precios mayores".
+:::
+
+# Pregunta 3: Dos proporciones {background-color="#2C3E50"}
+
+## Comparar proporciones entre alcaldías
+
+> "¿La proporción de superhosts es similar entre Roma Norte y Condesa?"
+
+$$H_0: p_{Roma} = p_{Condesa}$$
+$$H_1: p_{Roma} \neq p_{Condesa}$$
+
+Aquí estamos comparando dos proporciones poblacionales → `prop.test()` con dos argumentos.
+
+## Ejecución
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+# Conteos en cada zona
+resumen <- listings |>
+  filter(alcaldia %in% c("Roma Norte", "Condesa")) |>
+  group_by(alcaldia) |>
+  summarise(
+    n_super = sum(superhost == "Superhost", na.rm = TRUE),
+    n_total = sum(!is.na(superhost))
+  )
+
+print(resumen)
+
+# Prueba de diferencia de proporciones
+prop.test(
+  x = resumen$n_super,
+  n = resumen$n_total,
+  alternative = "two.sided"
+)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+resumen <- listings |>
+  filter(alcaldia %in% c("Roma Norte", "Condesa")) |>
+  group_by(alcaldia) |>
+  summarise(
+    n_super = sum(superhost == "Superhost", na.rm = TRUE),
+    n_total = sum(!is.na(superhost))
+  )
+
+knitr::kable(
+  resumen |> mutate(prop = round(n_super / n_total, 3)),
+  col.names = c("Alcaldía", "Superhosts", "Total", "Proporción")
+)
+```
+
+```{r}
+#| echo: false
+prop.test(
+  x = resumen$n_super,
+  n = resumen$n_total,
+  alternative = "two.sided"
+)
+```
+
+:::
+
+# Datos pareados {background-color="#18BC9C"}
+
+## Cuándo usar una prueba pareada
+
+Las pruebas vistas hasta ahora comparan **grupos independientes**. En algunos casos, cada observación aparece **dos veces** y queremos medir el cambio:
+
+- Examen antes vs. después de un curso, aplicado a los mismos alumnos
+- Ventas del mismo local en dos trimestres consecutivos
+- Presión arterial antes y después de un tratamiento, mismo paciente
+
+En estos casos, los datos están **pareados** y la prueba independiente sería incorrecta.
+
+## El caso pareado en Airbnb
+
+En el dataset de Airbnb no tenemos pares naturales: cada listing es una observación única. Por eso esta prueba **no aplica directamente a Patricia hoy**, pero conviene entenderla.
+
+Un ejemplo hipotético: si midiéramos el precio de los **mismos 100 listings** en enero y en julio, tendríamos datos pareados y preguntaríamos:
+
+$$H_0: \mu_{diferencia} = 0$$
+$$H_1: \mu_{diferencia} \neq 0$$
+
+## Sintaxis en R (referencia)
+
+```{.r}
+# Supongamos precio_enero y precio_julio de los mismos listings
+t.test(
+  precio_julio, precio_enero,
+  paired = TRUE,
+  alternative = "two.sided"
+)
+```
+
+La clave es el argumento `paired = TRUE`. Con eso R calcula las diferencias dentro de cada par y prueba si su media es cero.
+
+# Cierre {background-color="#2C3E50"}
+
+## Lo que aprendió Patricia hoy
+
+1. **Rentar completo vs. cuarto**: evidencia cuantitativa de cuál cobra más en promedio.
+2. **Superhost y mercado**: qué tan común es, y cuánta diferencia hay en el precio.
+3. **Roma vs. Condesa**: si debe preocuparse por la composición del mercado.
+
+Cada conclusión vino acompañada de advertencias honestas sobre lo que los datos **no** responden.
+
+## Lo que las pruebas de hoy NO resuelven
+
+::: {.callout-important}
+Las comparaciones de hoy son **una-variable-a-la-vez**. Eso es útil pero limitado: en la realidad, muchas cosas cambian al mismo tiempo.
+
+Ejemplo: si descubrimos que los superhosts cobran más, ¿es por ser superhost, o porque las propiedades de superhosts son diferentes (tamaño, ubicación)? No podemos saberlo con las pruebas de hoy.
+
+Para esto necesitaremos la **regresión** (sesiones 5–7), que permite "controlar" por otras variables.
+:::
+
+## Actividad para su notebook
+
+En su notebook `.ipynb`, repliquen:
+
+1. La comparación entre propiedad completa y cuarto privado en Roma Norte.
+2. La comparación de precio entre superhost y no-superhost.
+3. La comparación de proporciones entre Roma y una alcaldía de su elección.
+
+Entregable: una celda de markdown por cada prueba con el formato de comunicación profesional visto en clase.
+
+## Preview de la próxima sesión
+
+Patricia regresa con una pregunta que **amplifica** las de hoy:
+
+> *"Tres pruebas de dos grupos está bien, pero yo quiero comparar Roma, Condesa, Polanco y Del Valle **a la vez**. ¿Y si el tipo de propiedad se asocia con la política de cancelación?"*
+
+Comparar **más de dos grupos** → **ANOVA**.
+Asociar **dos variables categóricas** → **χ²**.
+
+**Sesión 3: ANOVA y chi-cuadrada.**

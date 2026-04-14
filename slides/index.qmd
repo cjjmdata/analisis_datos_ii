@@ -1,0 +1,26 @@
+---
+title: "Presentaciones"
+lang: es
+listing:
+  - id: parcial-3
+    contents:
+      - "p3/*.qmd"
+    type: table
+    fields: [title, subtitle, date]
+    field-display-names:
+      title: "Presentación"
+      subtitle: "Tema"
+      date: "Fecha"
+    sort: "filename asc"
+    date-format: "D MMM YYYY"
+    categories: false
+    filter-ui: false
+    sort-ui: false
+---
+
+## Parcial 3 · Estadística inferencial y modelado
+
+El Parcial 3 se estructura como un caso longitudinal con Patricia, una clienta ficticia que necesita tomar decisiones sobre un Airbnb en Roma Norte. Cada sesión agrega una capa al análisis.
+
+:::{#parcial-3}
+:::

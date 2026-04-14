@@ -1,0 +1,70 @@
+/*-- scss:defaults --*/
+
+// Paleta base (compatible con Flatly + acentos propios)
+// ---------------------------------------------------------
+$primary:   #2C3E50;  // Flatly primary — azul oscuro
+$secondary: #95A5A6;  // Flatly secondary — gris
+$success:   #18BC9C;  // Flatly success — verde azulado (acento principal)
+$info:      #3498DB;  // Flatly info — azul
+$warning:   #F39C12;  // Flatly warning — naranja
+$danger:    #E74C3C;  // Flatly danger — rojo
+
+// Tipografía
+// ---------------------------------------------------------
+$font-family-sans-serif: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+$headings-font-family: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+$font-family-monospace: "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+$font-size-base: 1rem;
+$h1-font-size: 2.2rem;
+$h2-font-size: 1.6rem;
+$h3-font-size: 1.3rem;
+
+// Espaciado
+// ---------------------------------------------------------
+$body-line-height: 1.6;
+
+/*-- scss:rules --*/
+
+// Ajustes finos
+// ---------------------------------------------------------
+
+// Encabezados con más peso visual
+h1, h2, h3 {
+  font-weight: 600;
+  color: $primary;
+}
+
+// Código inline más legible
+code:not(pre code) {
+  background-color: rgba($success, 0.08);
+  color: darken($success, 15%);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+// Bloques de código con borde sutil
+pre {
+  border-left: 3px solid $success;
+}
+
+// Callouts con mejor contraste
+.callout.callout-style-default .callout-body {
+  font-size: 0.95rem;
+}
+
+// Tablas más limpias
+table {
+  thead {
+    background-color: rgba($primary, 0.05);
+  }
+}
+
+// Links con subrayado al hover
+a {
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}

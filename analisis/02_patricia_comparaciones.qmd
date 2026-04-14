@@ -1,0 +1,214 @@
+---
+title: "Análisis completo · Sesión 2"
+subtitle: "Comparaciones: propiedad vs cuarto, superhost, zonas"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> Notebook interno de validación para la Sesión 2. Produce los números reales que alimentan la narrativa profesional hacia Patricia y sirve como modelo de respuesta post-sesión.
+
+## 1. Setup
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+listings <- readRDS("../datos/listings_cdmx.rds")
+
+colores <- list(primary = "#2C3E50", accent = "#18BC9C",
+                info = "#3498DB", warn = "#F39C12",
+                danger = "#E74C3C", light = "#ECF0F1")
+
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(face = "bold", color = colores$primary),
+          plot.subtitle = element_text(color = "#7F8C8D"),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = colores$light))
+}
+```
+
+## 2. Pregunta 1: Propiedad completa vs. Cuarto privado
+
+### 2.1 Subsets
+
+```{r}
+roma_norte <- listings |> filter(alcaldia == "Roma Norte")
+
+# Inspección
+roma_norte |>
+  count(tipo_habitacion) |>
+  kable(col.names = c("Tipo de habitación", "n"))
+```
+
+### 2.2 Estadísticos descriptivos
+
+```{r}
+resumen_tipos <- roma_norte |>
+  filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")) |>
+  group_by(tipo_habitacion) |>
+  summarise(
+    n        = n(),
+    media    = round(mean(precio), 0),
+    mediana  = round(median(precio), 0),
+    desv_est = round(sd(precio), 0)
+  )
+
+resumen_tipos |>
+  kable(col.names = c("Tipo", "n", "Media", "Mediana", "DE"),
+        format.args = list(big.mark = ","))
+```
+
+### 2.3 Visualización
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+roma_norte |>
+  filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")) |>
+  ggplot(aes(x = tipo_habitacion, y = precio, fill = tipo_habitacion)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 5000)) +
+  scale_fill_manual(values = c(colores$accent, colores$info)) +
+  labs(x = NULL, y = "Precio (MXN por noche)",
+       title = "Precio por tipo de habitación en Roma Norte") +
+  theme_curso() +
+  theme(legend.position = "none")
+```
+
+### 2.4 Prueba t de Welch
+
+```{r}
+prueba_tipos <- t.test(
+  precio ~ tipo_habitacion,
+  data = roma_norte |>
+    filter(tipo_habitacion %in% c("Propiedad completa", "Cuarto privado")),
+  alternative = "two.sided"
+)
+prueba_tipos
+```
+
+### 2.5 Interpretación
+
+```{r}
+#| echo: false
+dif_media <- round(diff(prueba_tipos$estimate), 0)
+```
+
+La diferencia observada es de aproximadamente **$`r abs(dif_media)` MXN por noche** entre los dos tipos (propiedad completa vs cuarto privado). El p-valor es `r format.pval(prueba_tipos$p.value, digits = 3)`, lo cual indica que la diferencia es **estadísticamente significativa**.
+
+## 3. Pregunta 2a: Proporción de superhosts
+
+### 3.1 Conteo
+
+```{r}
+conteo_super <- roma_norte |>
+  count(superhost) |>
+  mutate(prop = round(n / sum(n), 3))
+
+conteo_super |> kable()
+```
+
+### 3.2 Prueba contra una referencia (p₀ = 0.30)
+
+```{r}
+n_super <- sum(roma_norte$superhost == "Superhost", na.rm = TRUE)
+n_total <- sum(!is.na(roma_norte$superhost))
+
+prueba_prop_super <- prop.test(x = n_super, n = n_total, p = 0.30,
+                               alternative = "two.sided")
+prueba_prop_super
+```
+
+## 4. Pregunta 2b: ¿Los superhosts cobran más?
+
+```{r}
+prueba_super_precio <- t.test(
+  precio ~ superhost,
+  data = roma_norte |>
+    filter(tipo_habitacion == "Propiedad completa",
+           !is.na(superhost)),
+  alternative = "two.sided"
+)
+prueba_super_precio
+```
+
+```{r}
+#| echo: false
+dif_super <- round(diff(prueba_super_precio$estimate) * -1, 0)
+```
+
+La diferencia media observada es de $`r abs(dif_super)` MXN (superhost vs. no-superhost), con p-valor = `r format.pval(prueba_super_precio$p.value, digits = 3)`.
+
+::: {.callout-warning}
+**Recordatorio para la clase:** correlación ≠ causalidad. No se puede afirmar que "ser superhost causa un precio mayor". Puede ser que los hosts con propiedades mejores tiendan a ser superhosts.
+:::
+
+## 5. Pregunta 3: Proporción de superhosts Roma vs Condesa
+
+```{r}
+resumen_zonas <- listings |>
+  filter(alcaldia %in% c("Roma Norte", "Condesa")) |>
+  group_by(alcaldia) |>
+  summarise(
+    n_super = sum(superhost == "Superhost", na.rm = TRUE),
+    n_total = sum(!is.na(superhost)),
+    prop    = round(n_super / n_total, 3)
+  )
+
+resumen_zonas |> kable()
+```
+
+```{r}
+prueba_dos_prop <- prop.test(
+  x = resumen_zonas$n_super,
+  n = resumen_zonas$n_total,
+  alternative = "two.sided"
+)
+prueba_dos_prop
+```
+
+## 6. Recomendación consolidada para Patricia
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Comparaciones del mercado de Airbnb en Roma Norte**
+
+**Sobre modalidad de listado (completo vs cuarto):** rentar el depto completo genera un precio por noche significativamente mayor que un cuarto privado en Roma Norte. La decisión final, sin embargo, debe considerar ocupación esperada y costos operativos — veremos esa cuenta en sesiones posteriores.
+
+**Sobre superhost:** entre el `r round(conteo_super$prop[conteo_super$superhost == "Superhost"] * 100, 0)`% del mercado en Roma Norte es superhost. Los listings de superhosts están asociados con precios por noche más altos, pero eso no garantiza que volverse superhost, por sí solo, le permita cobrar más (pueden influir otras diferencias entre propiedades). Recomendamos considerarlo como meta a mediano plazo, no como estrategia única de precio.
+
+**Sobre composición del mercado vecino:** la proporción de superhosts en Roma y Condesa `r if(prueba_dos_prop$p.value < 0.05) "sí es significativamente distinta" else "no es significativamente distinta"`. Esto `r if(prueba_dos_prop$p.value < 0.05) "sugiere diferencias de madurez o estrategia entre zonas" else "indica que el mercado profesional está homogéneo entre las dos zonas"`.
+
+**Lo que este análisis NO resuelve aún:** el efecto *neto* de ser superhost controlando por otras variables (tamaño, ubicación exacta, reseñas). Eso requiere regresión múltiple.
+:::
+
+## 7. Preservación de resultados
+
+```{r}
+resultados_s02 <- list(
+  tipos_media_completo  = round(prueba_tipos$estimate[[1]], 0),
+  tipos_media_cuarto    = round(prueba_tipos$estimate[[2]], 0),
+  tipos_p_valor         = format.pval(prueba_tipos$p.value, digits = 3),
+  prop_super            = round(n_super / n_total, 3),
+  super_p_valor_precio  = format.pval(prueba_super_precio$p.value, digits = 3),
+  dos_prop_p_valor      = format.pval(prueba_dos_prop$p.value, digits = 3)
+)
+
+saveRDS(resultados_s02, "../datos/resultados_s02.rds")
+```

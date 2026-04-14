@@ -1,0 +1,154 @@
+/*-- scss:defaults --*/
+
+// Paleta (consistente con el sitio web)
+// ---------------------------------------------------------
+$primary:   #2C3E50;
+$success:   #18BC9C;
+$info:      #3498DB;
+$warning:   #F39C12;
+$danger:    #E74C3C;
+$light:     #ECF0F1;
+$dark:      #2C3E50;
+
+// Revealjs — variables principales
+// ---------------------------------------------------------
+$body-bg: #ffffff;
+$body-color: $primary;
+$link-color: $info;
+$selection-bg: rgba($success, 0.3);
+
+$main-font: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+$heading-font: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+$main-font-size: 32px;
+
+$heading-color: $primary;
+$heading-font-weight: 600;
+$h1-font-size: 2.0em;
+$h2-font-size: 1.5em;
+$h3-font-size: 1.2em;
+
+$code-font: "JetBrains Mono", "Fira Code", Consolas, monospace;
+$code-block-font-size: 0.75em;
+
+/*-- scss:rules --*/
+
+// Slide title
+// ---------------------------------------------------------
+.reveal .slide-title {
+  color: $primary;
+  font-weight: 600;
+  border-bottom: 3px solid $success;
+  padding-bottom: 0.2em;
+  margin-bottom: 0.5em;
+}
+
+// Tabset dentro de slides (el patrón clave del curso)
+// ---------------------------------------------------------
+.reveal .panel-tabset {
+  margin-top: 0.5em;
+
+  [role="tab"] {
+    font-size: 0.85em;
+    padding: 0.4em 1em;
+    color: $primary;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+
+    &[aria-selected="true"] {
+      border-bottom-color: $success;
+      color: $success;
+      font-weight: 600;
+    }
+
+    &:hover {
+      background-color: rgba($success, 0.08);
+    }
+  }
+}
+
+// Bloques de código
+// ---------------------------------------------------------
+.reveal pre {
+  box-shadow: none;
+  border-left: 4px solid $success;
+  background-color: rgba($light, 0.5);
+  font-size: 0.55em;
+  padding: 0.6em 1em;
+  max-height: 450px;
+  overflow-y: auto;
+}
+
+.reveal code {
+  color: darken($success, 10%);
+}
+
+// Callouts personalizados (para "Lo que esta prueba NO dice")
+// ---------------------------------------------------------
+.reveal .callout {
+  font-size: 0.85em;
+  padding: 0.6em 1em;
+  border-radius: 4px;
+  margin: 0.5em 0;
+}
+
+.reveal .callout-warning {
+  background-color: rgba($warning, 0.1);
+  border-left: 4px solid $warning;
+}
+
+.reveal .callout-note {
+  background-color: rgba($info, 0.1);
+  border-left: 4px solid $info;
+}
+
+.reveal .callout-important {
+  background-color: rgba($danger, 0.1);
+  border-left: 4px solid $danger;
+}
+
+// Énfasis destacado (para nombres de Patricia, conceptos clave)
+// ---------------------------------------------------------
+.patricia {
+  color: $danger;
+  font-weight: 600;
+}
+
+.concepto {
+  color: $success;
+  font-weight: 600;
+}
+
+.formula {
+  color: $info;
+  font-style: italic;
+}
+
+// Footer discreto
+// ---------------------------------------------------------
+.reveal .footer {
+  font-size: 0.5em;
+  color: $secondary;
+}
+
+// Listas con mejor espaciado
+.reveal ul li,
+.reveal ol li {
+  margin-bottom: 0.3em;
+}
+
+// Tablas limpias
+.reveal table {
+  font-size: 0.75em;
+  border-collapse: collapse;
+
+  th {
+    background-color: rgba($primary, 0.08);
+    color: $primary;
+    border-bottom: 2px solid $primary;
+  }
+
+  td, th {
+    padding: 0.4em 0.8em;
+  }
+}

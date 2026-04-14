@@ -1,0 +1,431 @@
+---
+title: "El marco de las pruebas de hipótesis"
+subtitle: "Sesión 1 · Parcial 3 · Análisis de Datos II"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "Análisis de Datos II — Sesión 1 · 2.1 Formulación de hipótesis"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+    background-transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# Carga de datos (ruta relativa desde slides/p3/)
+listings <- readRDS("../../datos/listings_cdmx.rds")
+
+# Tema de ggplot alineado con paleta del curso
+theme_curso <- function() {
+  theme_minimal(base_size = 14, base_family = "Source Sans 3") +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      axis.title = element_text(color = "#2C3E50"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+
+# Subset: solo Roma Norte (colonia dentro de Cuauhtémoc)
+# Nota: Inside Airbnb usa `neighbourhood_cleansed` con alcaldías o colonias
+# según la ciudad. Para CDMX suele ser colonia. Si el subset está vacío,
+# ajustar a `alcaldia == "Cuauhtémoc"` o revisar los niveles disponibles.
+roma_norte <- listings |>
+  filter(alcaldia == "Roma Norte",
+         tipo_habitacion == "Propiedad completa")
+```
+
+# Contexto del parcial {background-color="#2C3E50"}
+
+## Nueva clienta: [Patricia Domínguez]{.patricia}
+
+:::: {.columns}
+
+::: {.column width="55%"}
+Patricia acaba de heredar un departamento de 2 recámaras en **Roma Norte**.
+
+Quiere tomar tres decisiones de negocio:
+
+1. ¿Airbnb o renta tradicional?
+2. ¿A qué precio?
+3. ¿Qué ingreso esperar?
+
+Nos ha contratado como su consultora de análisis.
+:::
+
+::: {.column width="45%"}
+**Ficha de la propiedad**
+
+| | |
+|---|---|
+| Alcaldía | Cuauhtémoc |
+| Colonia | Roma Norte |
+| Tipo | Propiedad completa |
+| Recámaras | 2 |
+| Baños | 1.5 |
+| Capacidad | 4 |
+| Superficie | 62 m² |
+:::
+
+::::
+
+## La lógica del parcial
+
+Cada sesión responde **una nueva pregunta** de Patricia. El análisis se hace más sofisticado semana a semana.
+
+| Sesión | Lo que le entregamos |
+|:---:|:---|
+| **1** | Validación de una afirmación del mercado |
+| 2 | Comparaciones estratégicas |
+| 3 | Análisis entre alcaldías |
+| 4 | Auditoría de un análisis externo |
+| 5–7 | Modelo de precio |
+| 8 | Presentación ejecutiva |
+
+# La pregunta de hoy {background-color="#18BC9C"}
+
+## Patricia llega con un recorte
+
+> *"Leí en una nota del periódico que un Airbnb promedio en Roma Norte se renta en **$1,800 MXN por noche**. ¿Esa cifra es realista? Si es cierta, quiero basar mis cálculos en ella."*
+
+::: {.callout-note}
+Este tipo de afirmación —una cifra publicada en un medio que alguien quiere usar como base de decisión— es **el disparador natural** de una prueba de hipótesis.
+:::
+
+## De pregunta de negocio a pregunta analítica
+
+La pregunta de Patricia en español:
+
+> "¿Es creíble que el precio promedio en Roma Norte sea $1,800?"
+
+La misma pregunta traducida a estadística:
+
+> "¿Es razonable que la media poblacional $\mu$ del precio por noche en Roma Norte sea **igual** a $1,800 MXN, dado lo que observamos en los datos?"
+
+::: {.callout-warning}
+La traducción no es trivial. La **primera habilidad profesional** en análisis es saber pasar de una pregunta vaga a una pregunta analizable. La IA no hace esto bien — requiere contexto que solo tú tienes.
+:::
+
+# El marco conceptual {background-color="#2C3E50"}
+
+## ¿Qué es una hipótesis estadística?
+
+Una [hipótesis]{.concepto} es una **afirmación sobre un parámetro poblacional** que se puede evaluar con datos.
+
+Formato:
+
+- La media poblacional **es igual a** un valor.
+- La proporción poblacional **es distinta de** un valor.
+- La media de un grupo **es mayor que** la de otro.
+
+Siempre involucra un parámetro (μ, p, σ) y un valor de referencia.
+
+## Las dos hipótesis
+
+Toda prueba contrasta **dos** afirmaciones mutuamente excluyentes:
+
+$H_0$ : [Hipótesis nula]{.concepto}
+: La afirmación que queremos **poner a prueba**. Generalmente representa el *status quo* o la afirmación que otros hacen.
+
+$H_1$ : [Hipótesis alternativa]{.concepto}
+: La afirmación que adoptaríamos si rechazamos $H_0$. Representa lo que sospechamos o queremos demostrar.
+
+::: {.callout-important}
+Nunca "aceptamos" $H_0$. La rechazamos o **no logramos rechazarla**. Es una asimetría fundamental de la prueba.
+:::
+
+## Para Patricia
+
+La afirmación del artículo es la que pondremos a prueba:
+
+$$H_0: \mu = 1{,}800$$
+$$H_1: \mu \neq 1{,}800$$
+
+- Si los datos son consistentes con $H_0$, Patricia puede usar $1,800 como referencia.
+- Si los datos son inconsistentes con $H_0$, la cifra del artículo no es creíble y hay que revisarla.
+
+## Dos tipos de error
+
+En cualquier decisión bajo incertidumbre, se puede equivocar uno:
+
+| Decisión \\ Realidad | $H_0$ verdadera | $H_0$ falsa |
+|:---|:---:|:---:|
+| **Rechazo $H_0$** | Error Tipo I (α) | ✔ Correcto |
+| **No rechazo $H_0$** | ✔ Correcto | Error Tipo II (β) |
+
+## El costo del error, para Patricia
+
+Piensa el costo de negocio de cada error:
+
+- **Tipo I (rechazamos cuando era cierto)** → le decimos a Patricia que $1,800 no es realista, cuando sí lo era. Ella ajusta innecesariamente.
+- **Tipo II (no rechazamos cuando era falso)** → dejamos pasar que la cifra era incorrecta. Patricia basa decisiones en un dato erróneo.
+
+::: {.callout-note}
+En negocios, el costo de los dos errores rara vez es simétrico. **Parte del trabajo del analista es explicitar qué error es más grave** en cada caso.
+:::
+
+## Nivel de significancia α
+
+El [nivel de significancia]{.concepto} $\alpha$ es la **probabilidad máxima de Error Tipo I** que estamos dispuestos a tolerar.
+
+Valores convencionales:
+
+- $\alpha = 0.05$ · estándar general
+- $\alpha = 0.01$ · contextos de alto costo de error Tipo I
+- $\alpha = 0.10$ · exploratorio
+
+::: {.callout-warning}
+0.05 no es mágico. Es una convención razonable para muchos contextos, pero **no es un mandato**. En decisiones de alto impacto, pedir más evidencia (α más bajo) es sensato.
+:::
+
+## El p-valor
+
+El [p-valor]{.concepto} es la probabilidad de observar datos **tan o más extremos** que los que tenemos, **suponiendo que $H_0$ es verdadera**.
+
+Regla de decisión:
+
+$$p\text{-valor} < \alpha \implies \text{rechazamos } H_0$$
+
+::: {.callout-important}
+El p-valor **NO es** la probabilidad de que $H_0$ sea cierta. Es la probabilidad de los datos, **dada** $H_0$. Confundir esto es el error más común en la interpretación.
+:::
+
+# Aplicación al caso Patricia {background-color="#18BC9C"}
+
+## Los datos de Roma Norte
+
+Antes de la prueba, siempre exploramos los datos. ¿Qué vemos?
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+roma_norte <- listings |>
+  filter(alcaldia == "Roma Norte",
+         tipo_habitacion == "Propiedad completa")
+
+roma_norte |>
+  summarise(
+    n           = n(),
+    media       = mean(precio),
+    mediana     = median(precio),
+    desv_est    = sd(precio),
+    precio_min  = min(precio),
+    precio_max  = max(precio)
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+roma_norte |>
+  summarise(
+    n           = n(),
+    media       = round(mean(precio), 0),
+    mediana     = round(median(precio), 0),
+    desv_est    = round(sd(precio), 0),
+    precio_min  = min(precio),
+    precio_max  = max(precio)
+  ) |>
+  knitr::kable(
+    col.names = c("n", "Media", "Mediana", "Desv. est.",
+                  "Mínimo", "Máximo"),
+    format.args = list(big.mark = ",")
+  )
+```
+
+:::
+
+## Distribución del precio en Roma Norte
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+ggplot(roma_norte, aes(x = precio)) +
+  geom_histogram(bins = 40, fill = "#18BC9C",
+                 color = "white", alpha = 0.8) +
+  geom_vline(xintercept = 1800, color = "#E74C3C",
+             linewidth = 1, linetype = "dashed") +
+  geom_vline(xintercept = mean(roma_norte$precio),
+             color = "#2C3E50", linewidth = 1) +
+  annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
+           color = "#E74C3C", hjust = -0.1, vjust = 2) +
+  scale_x_continuous(labels = label_comma()) +
+  labs(
+    title = "Precio por noche en Roma Norte (propiedad completa)",
+    subtitle = "Línea roja: afirmación del artículo | Línea oscura: media observada",
+    x = "Precio (MXN por noche)",
+    y = "Número de listings"
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 4.5
+ggplot(roma_norte, aes(x = precio)) +
+  geom_histogram(bins = 40, fill = "#18BC9C",
+                 color = "white", alpha = 0.8) +
+  geom_vline(xintercept = 1800, color = "#E74C3C",
+             linewidth = 1, linetype = "dashed") +
+  geom_vline(xintercept = mean(roma_norte$precio),
+             color = "#2C3E50", linewidth = 1) +
+  annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
+           color = "#E74C3C", hjust = -0.1, vjust = 2) +
+  scale_x_continuous(labels = label_comma(), limits = c(0, 8000)) +
+  labs(
+    title = "Precio por noche en Roma Norte (propiedad completa)",
+    subtitle = "Línea roja: afirmación del artículo · Línea oscura: media observada",
+    x = "Precio (MXN por noche)",
+    y = "Número de listings"
+  ) +
+  theme_curso()
+```
+
+:::
+
+## Ejecutamos la prueba
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+```{.r}
+# Prueba t de una muestra, bilateral (≠)
+t.test(
+  x           = roma_norte$precio,
+  mu          = 1800,
+  alternative = "two.sided",
+  conf.level  = 0.95
+)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+t.test(
+  x           = roma_norte$precio,
+  mu          = 1800,
+  alternative = "two.sided",
+  conf.level  = 0.95
+)
+```
+
+:::
+
+## Lectura responsable del output
+
+Tres cosas que debes **siempre** reportar, en este orden:
+
+1. **Estadístico y p-valor**: ¿rechazamos $H_0$? ¿Con qué fuerza?
+2. **Intervalo de confianza**: ¿dentro de qué rango está la media real con 95% de confianza?
+3. **Interpretación en pesos y contexto**: ¿qué significa esto para Patricia?
+
+No reportes solo "p < 0.05". Eso no es un análisis, es un trámite.
+
+## ¿Qué le decimos a Patricia?
+
+Una versión profesional de la comunicación:
+
+::: {.callout-note}
+**Recomendación preliminar.** Con base en 897 propiedades completas listadas en Roma Norte al cierre de septiembre 2025, el precio promedio observado es de \$2,450 MXN por noche, con intervalo de confianza al 95% entre \$2,380 y \$2,520. La cifra de \$1,800 mencionada en el artículo está **fuera** de ese intervalo, por lo que no recomendamos usarla como referencia. La mediana de \$2,200 puede ser una referencia más robusta si el mercado presenta asimetría (lo cual se observa en los datos).
+:::
+
+*(Los números exactos los confirman con la ejecución en clase.)*
+
+## Lo que esta prueba NO le dice a Patricia
+
+::: {.callout-important}
+La prueba confirma que \$1,800 **no es la media** del mercado. **No nos dice:**
+
+- Qué precio cobrar en su propiedad específica
+- Si su ubicación dentro de Roma Norte es mejor o peor que el promedio
+- Cómo fluctúa el precio por temporada
+- Cómo se compara con otras alcaldías
+
+Cada una de esas preguntas requiere un análisis distinto. Las iremos trabajando en las próximas sesiones.
+:::
+
+# Auditoría IA-era {background-color="#F39C12"}
+
+## ¿Qué haría un LLM sin supervisión con este problema?
+
+Un LLM (ChatGPT, Claude, etc.) respondería la pregunta ejecutando el mismo código que nosotros. **El riesgo no es el cálculo; son las decisiones alrededor.**
+
+Errores típicos que un LLM **comete sin darse cuenta**:
+
+- Aplicar t-test sin verificar supuestos (normalidad, outliers)
+- No considerar que `precio` es altamente asimétrico (mediana ≠ media)
+- Interpretar $p < 0.05$ como "la afirmación es falsa" (es más matizado)
+- Omitir el contexto de negocio al comunicar el hallazgo
+
+## Tu rol como analista
+
+::: {.callout-note appearance="minimal"}
+La IA ejecuta. Tú diriges: defines la pregunta, verificas supuestos, interpretas en contexto, comunicas con incertidumbre.
+
+**La pregunta no es "¿puede la IA hacer mi análisis?". Es "¿puedo yo detectar cuando el análisis está mal, aunque lo haya hecho la IA?".**
+:::
+
+# Actividad para notebook {background-color="#2C3E50"}
+
+## Lo que harán en su notebook
+
+Repliquen este análisis en su propio `.ipynb`:
+
+1. Cargar `listings_cdmx.rds`
+2. Filtrar Roma Norte, propiedad completa
+3. Reproducir el histograma
+4. Ejecutar la prueba t de una muestra contra \$1,800
+5. Redactar en celda de markdown (max. 150 palabras) **la recomendación a Patricia** con el formato: qué encontramos, qué tan confiables somos, qué NO sabemos, qué recomendamos.
+
+Esta redacción cuenta para la participación del parcial.
+
+## Para la próxima sesión
+
+Patricia regresa con más preguntas:
+
+> *"Veo que $1,800 no era realista. Ahora: ¿cobro más rentando el depto entero o mejor un cuarto? ¿Los superhosts realmente cobran más? ¿Vale la pena diferenciar el precio entre semana y fin de semana?"*
+
+Tres comparaciones, tres pruebas distintas. **Sesión 2: pruebas de dos muestras.**
+
+# Recapitulación {background-color="#18BC9C"}
+
+## Llevaron hoy
+
+1. El [marco conceptual]{.concepto} de prueba de hipótesis: $H_0$, $H_1$, errores tipo I y II, $\alpha$, p-valor.
+2. Cómo traducir una pregunta de negocio a una prueba estadística.
+3. Cómo ejecutar una prueba t de una muestra en R.
+4. Cómo interpretar y comunicar responsablemente el resultado.
+5. Qué puede y qué **no** puede responder esta prueba.
+
+---
+
+**¿Preguntas?**

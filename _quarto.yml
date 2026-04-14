@@ -1,0 +1,56 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - "*.qmd"
+    - "slides/**/*.qmd"
+    - "recursos/**/*.qmd"
+    - "auditorias/**/*.qmd"
+    - "!analisis/"     # notebooks internos de validación — no se publican
+    - "!scripts/"      # scripts R — no se publican
+  resources:
+    - "datos/*.rds"
+    - "datos/*.csv"
+
+website:
+  title: "Análisis de Datos II"
+  description: "Curso de Estadística Inferencial y Modelado"
+  favicon: assets/img/favicon.png
+  navbar:
+    background: primary
+    left:
+      - text: "Inicio"
+        href: index.qmd
+      - text: "Presentaciones"
+        href: slides/index.qmd
+      - text: "Recursos"
+        href: recursos/index.qmd
+      - text: "Auditorías"
+        href: auditorias/index.qmd
+      - text: "Postura sobre IA"
+        href: postura-ia.qmd
+    right:
+      - icon: github
+        href: https://github.com/   # ← actualizar con el repo real
+        aria-label: Repositorio en GitHub
+  page-footer:
+    left: "Análisis de Datos II · 2026"
+    right: "Construido con [Quarto](https://quarto.org/)"
+
+format:
+  html:
+    theme:
+      light: [flatly, estilo-sitio.scss]
+    css: styles.css
+    toc: true
+    toc-location: right
+    code-link: true
+    code-copy: true
+    code-overflow: wrap
+    lang: es
+    fig-responsive: true
+
+execute:
+  freeze: auto      # no re-renderiza chunks ya computados
+  warning: false    # oculta warnings en el sitio (no en clase)
+  message: false

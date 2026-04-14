@@ -1,0 +1,262 @@
+---
+title: "Análisis completo · Sesión 1"
+subtitle: "Validación de la afirmación: $1,800 MXN como precio promedio en Roma Norte"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> **Propósito de este documento.** Es el análisis completo que subyace la presentación de la Sesión 1. Se ejecuta de principio a fin con datos reales y permite: (a) validar que no haya placeholders en las slides, (b) obtener los números exactos para la narrativa profesional a Patricia, (c) servir como modelo de respuesta que los alumnos pueden consultar después de la clase.
+>
+> **No se publica en el sitio.** Vive en `analisis/` que está excluida del render.
+
+## 1. Setup
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Datos limpios preparados por scripts/00_descarga_datos.R
+listings <- readRDS("../datos/listings_cdmx.rds")
+
+# Paleta del curso (consistente con slides)
+colores <- list(
+  primary = "#2C3E50",
+  accent  = "#18BC9C",
+  info    = "#3498DB",
+  warn    = "#F39C12",
+  danger  = "#E74C3C",
+  light   = "#ECF0F1"
+)
+
+# Tema de ggplot reusable
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", color = colores$primary),
+      plot.subtitle = element_text(color = "#7F8C8D"),
+      axis.title = element_text(color = colores$primary),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = colores$light)
+    )
+}
+```
+
+## 2. Exploración inicial
+
+### 2.1 Estructura general del dataset
+
+```{r}
+glimpse(listings)
+```
+
+### 2.2 Distribución de niveles de `alcaldia`
+
+Verificamos cómo Inside Airbnb etiqueta el campo `neighbourhood_cleansed` para CDMX. Esto determina si "Roma Norte" aparece directamente o si hay que ajustar el filtro.
+
+```{r}
+listings |>
+  count(alcaldia, sort = TRUE) |>
+  head(15) |>
+  kable(col.names = c("Alcaldía/Colonia", "Listings"))
+```
+
+::: {.callout-note}
+**Decisión operativa al revisar este output.** Si aparece "Roma Norte" → el filtro de las slides funciona. Si aparece solo "Cuauhtémoc" → hay que ajustar a nivel de alcaldía y la narrativa cambia a "en toda Cuauhtémoc" en lugar de "en Roma Norte". Documentar esta decisión antes de la clase.
+:::
+
+## 3. Subset: Roma Norte, propiedad completa
+
+```{r}
+roma_norte <- listings |>
+  filter(alcaldia == "Roma Norte",
+         tipo_habitacion == "Propiedad completa")
+
+# Tamaño del subset
+n_roma <- nrow(roma_norte)
+cat("Listings en el subset:", n_roma, "\n")
+```
+
+### 3.1 Estadísticos descriptivos del precio
+
+```{r}
+resumen <- roma_norte |>
+  summarise(
+    n           = n(),
+    media       = mean(precio),
+    mediana     = median(precio),
+    desv_est    = sd(precio),
+    p10         = quantile(precio, 0.10),
+    p90         = quantile(precio, 0.90),
+    precio_min  = min(precio),
+    precio_max  = max(precio)
+  )
+
+resumen |>
+  mutate(across(where(is.numeric), \(x) round(x, 0))) |>
+  kable(format.args = list(big.mark = ","))
+```
+
+### 3.2 Distribución visual
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+ggplot(roma_norte, aes(x = precio)) +
+  geom_histogram(bins = 40, fill = colores$accent,
+                 color = "white", alpha = 0.85) +
+  geom_vline(xintercept = 1800, color = colores$danger,
+             linewidth = 1, linetype = "dashed") +
+  geom_vline(xintercept = mean(roma_norte$precio),
+             color = colores$primary, linewidth = 1) +
+  annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
+           color = colores$danger, hjust = -0.1, vjust = 2, size = 4) +
+  annotate("text", x = mean(roma_norte$precio), y = Inf,
+           label = paste0("Media observada: $",
+                          format(round(mean(roma_norte$precio)), big.mark = ",")),
+           color = colores$primary, hjust = 1.1, vjust = 4, size = 4) +
+  scale_x_continuous(labels = label_comma(), limits = c(0, 8000)) +
+  labs(
+    title = "Precio por noche en Roma Norte · Propiedad completa",
+    subtitle = "Distribución de listings activos al cierre de septiembre 2025",
+    x = "Precio (MXN por noche)",
+    y = "Número de listings",
+    caption = "Fuente: Inside Airbnb, corte 2025-09-27"
+  ) +
+  theme_curso()
+```
+
+### 3.3 Diagnóstico de supuestos de la t-test
+
+La prueba t de una muestra supone que la media muestral se distribuye normalmente. Con $n$ grande (por TCL) esto se cumple incluso si los datos son asimétricos. Verificamos:
+
+```{r}
+# Tamaño de muestra (grande → TCL aplica)
+cat("n =", n_roma, "— TCL aplica si n ≥ 30\n\n")
+
+# Skewness y asimetría visual
+cat("Asimetría de los datos originales:\n")
+cat("  Media      :", round(mean(roma_norte$precio), 0), "\n")
+cat("  Mediana    :", round(median(roma_norte$precio), 0), "\n")
+cat("  (Si media > mediana, los datos están sesgados a la derecha,\n")
+cat("   típico de precios; no invalida la t-test por TCL.)\n")
+```
+
+## 4. Prueba de hipótesis
+
+### 4.1 Formulación
+
+$$H_0: \mu = 1{,}800 \quad \text{vs.} \quad H_1: \mu \neq 1{,}800$$
+
+Nivel de significancia: $\alpha = 0.05$.
+
+### 4.2 Ejecución
+
+```{r}
+prueba <- t.test(
+  x           = roma_norte$precio,
+  mu          = 1800,
+  alternative = "two.sided",
+  conf.level  = 0.95
+)
+
+prueba
+```
+
+### 4.3 Extracción de elementos clave para la narrativa
+
+```{r}
+resultados <- list(
+  media_muestral   = round(mean(roma_norte$precio), 0),
+  mediana_muestral = round(median(roma_norte$precio), 0),
+  estadistico_t    = round(prueba$statistic, 3),
+  grados_libertad  = round(prueba$parameter, 0),
+  p_valor          = format.pval(prueba$p.value, digits = 3),
+  ic_inf           = round(prueba$conf.int[1], 0),
+  ic_sup           = round(prueba$conf.int[2], 0),
+  n                = n_roma
+)
+
+# Imprimir de forma legible
+cat("Media muestral       :", format(resultados$media_muestral, big.mark = ","), "MXN\n")
+cat("Mediana muestral     :", format(resultados$mediana_muestral, big.mark = ","), "MXN\n")
+cat("Estadístico t        :", resultados$estadistico_t, "\n")
+cat("Grados de libertad   :", resultados$grados_libertad, "\n")
+cat("Valor-p              :", resultados$p_valor, "\n")
+cat("IC 95% para la media : [",
+    format(resultados$ic_inf, big.mark = ","), ",",
+    format(resultados$ic_sup, big.mark = ","), "] MXN\n")
+cat("n                    :", resultados$n, "\n")
+```
+
+## 5. Interpretación profesional
+
+### 5.1 Decisión estadística
+
+```{r}
+#| echo: false
+if (prueba$p.value < 0.05) {
+  decision <- "Rechazamos H₀"
+  conclusion <- "La media poblacional NO es $1,800."
+} else {
+  decision <- "No rechazamos H₀"
+  conclusion <- "Los datos son consistentes con una media de $1,800."
+}
+```
+
+- **Decisión**: `r decision` (p = `r resultados$p_valor`).
+- **Conclusión**: `r conclusion`
+- **Intervalo de confianza al 95%**: entre $`r format(resultados$ic_inf, big.mark=",")` y $`r format(resultados$ic_sup, big.mark=",")` MXN.
+
+### 5.2 Recomendación a Patricia
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Validación de la referencia de $1,800 MXN**
+
+Con base en `r resultados$n` propiedades completas listadas en Roma Norte (corte del 27 de septiembre de 2025), el precio promedio observado es de **$`r format(resultados$media_muestral, big.mark=",")` MXN por noche**, con intervalo de confianza al 95% entre **$`r format(resultados$ic_inf, big.mark=",")` y $`r format(resultados$ic_sup, big.mark=",")` MXN**. La cifra de $1,800 mencionada en el artículo está **fuera** de ese intervalo (p = `r resultados$p_valor`), por lo que recomendamos no usarla como referencia para su planeación financiera.
+
+La mediana observada es **$`r format(resultados$mediana_muestral, big.mark=",")` MXN**, y como el precio de Airbnb tiende a distribuirse de forma asimétrica (algunos listings muy caros elevan la media), puede ser una referencia más conservadora y robusta.
+
+**Lo que este análisis NO responde aún**: qué precio cobrar específicamente por su depto de 2 recámaras, cómo varía el precio por temporada, o cómo se compara Roma Norte con otras alcaldías. Esos análisis los trabajaremos en las siguientes sesiones.
+:::
+
+## 6. Números exactos para las slides
+
+Esta es la tabla de sustitución para eliminar placeholders de `01_marco_pruebas_hipotesis.qmd`:
+
+```{r}
+#| echo: false
+tibble::tribble(
+  ~Placeholder_en_slides, ~Valor_real,
+  "897 propiedades",     paste(resultados$n, "propiedades"),
+  "$2,450 promedio",     paste0("$", format(resultados$media_muestral, big.mark=","), " promedio"),
+  "$2,380",              paste0("$", format(resultados$ic_inf, big.mark=",")),
+  "$2,520",              paste0("$", format(resultados$ic_sup, big.mark=",")),
+  "$2,200 mediana",      paste0("$", format(resultados$mediana_muestral, big.mark=","), " mediana")
+) |> kable()
+```
+
+## 7. Preservación de resultados
+
+Guardamos los resultados para que otras sesiones puedan referenciarlos si hace falta:
+
+```{r}
+saveRDS(resultados, "../datos/resultados_s01.rds")
+message("Resultados guardados en datos/resultados_s01.rds")
+```
