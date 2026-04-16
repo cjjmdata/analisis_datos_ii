@@ -474,9 +474,11 @@ t.test(
 Observamos: superhost \$`r format(resultados$media_super, big.mark=",")` MXN/noche vs. no-superhost \$`r format(resultados$media_no_super, big.mark=",")` MXN/noche (diferencia ≈ \$`r format(resultados$dif_super, big.mark=",")`, p = `r resultados$super_p_valor`).
 
 ::: {.callout-warning}
-Que la prueba diga que los superhosts cobran más **NO significa que ser superhost cause un precio mayor**. Puede ser que los hosts con propiedades mejores (más grandes, mejor ubicadas) tengan más probabilidad de volverse superhosts.
+La diferencia **no es estadísticamente significativa**. No tenemos evidencia de que superhosts y no-superhosts cobren distinto en Roma Norte.
 
-Esta es la distinción **correlación vs. causalidad** que retomaremos en regresión múltiple (sesión 7). Por ahora, lo honesto es decir: "los superhosts están asociados con precios mayores".
+Pero cuidado con el salto lógico inverso: esto **no prueba que sean iguales**. Solo dice que, con estos datos, no podemos distinguir la diferencia del azar. Además, aunque hubiéramos encontrado diferencia, eso no implicaría causalidad: podría ser que las propiedades de superhosts sean distintas (tamaño, equipamiento).
+
+Esta distinción **correlación vs. causalidad** la retomaremos en regresión múltiple (sesión 7).
 :::
 
 # Pregunta 3: Dos proporciones {background-color="#2C3E50"}
@@ -584,7 +586,7 @@ La clave es el argumento `paired = TRUE`. Con eso R calcula las diferencias dent
 ## Lo que aprendió Patricia hoy {.smaller}
 
 1. **Rentar completo vs. cuarto**: diferencia ≈ \$`r format(resultados$dif_tipos, big.mark=",")` MXN/noche a favor de la propiedad completa (p = `r resultados$tipos_p_valor`).
-2. **Superhost y mercado**: `r resultados$prop_super_pct`% del mercado en Roma Norte son superhosts; los superhosts cobran ≈ \$`r format(resultados$dif_super, big.mark=",")` más por noche (p = `r resultados$super_p_valor`).
+2. **Superhost y mercado**: `r resultados$prop_super_pct`% del mercado en Roma Norte son superhosts; la diferencia de precio entre superhosts y no-superhosts **no es significativa** (≈ \$`r format(resultados$dif_super, big.mark=",")`; p = `r resultados$super_p_valor`).
 3. **Roma vs. Condesa**: `r resultados$prop_roma`% vs. `r resultados$prop_condesa`% superhosts; la diferencia `r if (resultados$dos_prop_signif) "sí es" else "no es"` estadísticamente significativa (p = `r resultados$dos_prop_p_valor`).
 
 Cada conclusión vino acompañada de advertencias honestas sobre lo que los datos **no** responden.
@@ -594,7 +596,7 @@ Cada conclusión vino acompañada de advertencias honestas sobre lo que los dato
 ::: {.callout-important}
 Las comparaciones de hoy son **una-variable-a-la-vez**. Eso es útil pero limitado: en la realidad, muchas cosas cambian al mismo tiempo.
 
-Ejemplo: si descubrimos que los superhosts cobran más, ¿es por ser superhost, o porque las propiedades de superhosts son diferentes (tamaño, ubicación)? No podemos saberlo con las pruebas de hoy.
+Ejemplo: no encontramos diferencia de precio entre superhosts y no-superhosts, pero ¿y si la hay y está oculta por otras variables (tamaño, ubicación)? No podemos saberlo con las pruebas de hoy.
 
 Para esto necesitaremos la **regresión** (sesiones 5–7), que permite "controlar" por otras variables.
 :::
