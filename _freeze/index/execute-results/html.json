@@ -1,0 +1,15 @@
+{
+  "hash": "fd3964e4e3ccdf549e9a4e41f9b8af63",
+  "result": {
+    "engine": "knitr",
+    "markdown": "---\ntitle: \"Análisis de Datos II\"\nsubtitle: \"Estadística inferencial y modelado para la toma de decisiones\"\nlang: es\nexecute:\n  echo: false\n  warning: false\n  message: false\n---\n\n\n\nEste sitio reúne las **presentaciones, casos y recursos** del curso Análisis de Datos II (MAT2409). El enfoque combina los temas del programa oficial con una postura clara: en la era de la IA, el valor del analista no está en ejecutar cálculos, sino en **formular buenas preguntas, verificar resultados y comunicar decisiones bajo incertidumbre**.\n\n## Cómo usar este sitio\n\n**[Presentaciones](slides/index.qmd)** · cada sesión del curso tiene su presentación con código y resultados en pestañas separadas para facilitar el estudio y la replicación en su notebook.\n\n**[Recursos](recursos/index.qmd)** · bibliografía, guías de uso de R, y la guía sobre cómo usar IA responsablemente en este curso.\n\n**[Auditorías](auditorias/index.qmd)** · análisis defectuosos para practicar el pensamiento crítico. Son el núcleo de la evaluación AI-era del curso.\n\n**[Postura sobre IA](postura-ia.qmd)** · lo que se puede y no se puede hacer con herramientas de IA en los entregables. Lectura obligatoria antes de la primera evaluación.\n\n## El parcial en curso\n\nEl Parcial 3 trabaja sobre un caso longitudinal: **la consultora de análisis que ustedes integran debe ayudar a Patricia, una clienta que heredó un departamento en Roma Norte, a tomar decisiones fundamentadas sobre su listing en Airbnb.**\n\nCada sesión agrega una capa al análisis:\n\n1. Validación de una afirmación del mercado\n2. Comparación entre opciones de listado\n3. Comparación entre alcaldías\n4. Auditoría de un análisis externo\n5. Modelado del precio\n6. Diagnóstico y rangos de confianza\n7. Modelo con múltiples factores\n8. Presentación ejecutiva y defensa\n\nLos datos provienen de [Inside Airbnb](https://insideairbnb.com/), corte del 28 de septiembre de 2025, bajo licencia Creative Commons.\n\n## Aviso importante sobre este sitio\n\nEste sitio contiene **únicamente materiales docentes de consulta**. Todo lo relativo a entregas, calificaciones, fechas, evaluaciones y comunicación con el grupo se administra exclusivamente por Brightspace.\n",
+    "supporting": [],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {},
+    "engineDependencies": {},
+    "preserve": {},
+    "postProcess": true
+  }
+}

@@ -6,7 +6,9 @@ datos/*.csv.gz
 
 # Cachés de Quarto
 _site/
-_freeze/
+# _freeze/ — versionado para deploy con GitHub Pages (Opción B)
+# pero excluir site_libs/ (assets estáticos que Quarto ya tiene bundled)
+_freeze/site_libs/
 .quarto/
 *_files/
 
@@ -25,3 +27,5 @@ Thumbs.db
 .idea/
 *.swp
 EOF
+
+/.quarto/

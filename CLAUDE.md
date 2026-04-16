@@ -183,6 +183,33 @@ quarto preview
 quarto render
 ```
 
+## Deploy
+
+El sitio se publica en **GitHub Pages** usando la estrategia de **freeze local** (Opción B):
+
+- **URL**: https://cjjmdata.github.io/analisis_datos_ii/
+- **Disparador**: cada push a `main` ejecuta `.github/workflows/publish.yml`
+- **Cómo funciona**: CI no ejecuta código R. Usa los resultados pre-computados en `_freeze/` (versionado en el repo). Solo Quarto genera el HTML a partir de los freeze existentes.
+- **Flujo de trabajo**:
+  1. Renderizar localmente (`quarto render` o `quarto preview`)
+  2. Hacer commit de los cambios + `_freeze/`
+  3. Push a `main` → GitHub Actions publica automáticamente
+
+```bash
+# Preview local (no requiere push)
+quarto preview
+
+# Render completo local (genera _freeze/ actualizado)
+quarto render
+
+# Verificar que _freeze/ tiene cambios después del render
+git status
+```
+
+- **Monitorear builds**: en GitHub → Actions → "Publish site to GitHub Pages"
+- **Si el build falla**: revisar los logs del job en Actions. Las causas comunes son archivos referenciados que no existen o YAML malformado.
+- **Importante**: si agregas slides con nuevos chunks R, debes renderizar localmente primero para que `_freeze/` capture los resultados. Sin esto, CI falla.
+
 ## Contacto con el usuario
 
 Javier trabaja en Positron. Prefiere iterar rápido con feedback crítico. No le agrada que le validen acríticamente ideas débiles. Escribe en español. El conocimiento previo que tiene sobre el proyecto está en su memoria de Claude (este archivo lo condensa para Claude Code).

@@ -8,13 +8,11 @@ project:
     - "auditorias/**/*.qmd"
     - "!analisis/"     # notebooks internos de validación — no se publican
     - "!scripts/"      # scripts R — no se publican
-  resources:
-    - "datos/*.rds"
-    - "datos/*.csv"
 
 website:
   title: "Análisis de Datos II"
   description: "Curso de Estadística Inferencial y Modelado"
+  site-url: https://cjjmdata.github.io/analisis_datos_ii/
   favicon: assets/img/favicon.png
   navbar:
     background: primary
@@ -31,7 +29,7 @@ website:
         href: postura-ia.qmd
     right:
       - icon: github
-        href: https://github.com/   # ← actualizar con el repo real
+        href: https://github.com/cjjmdata/analisis_datos_ii
         aria-label: Repositorio en GitHub
   page-footer:
     left: "Análisis de Datos II · 2026"
@@ -41,7 +39,6 @@ format:
   html:
     theme:
       light: [flatly, estilo-sitio.scss]
-    css: styles.css
     toc: true
     toc-location: right
     code-link: true
