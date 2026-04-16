@@ -13,7 +13,7 @@ website:
   title: "Análisis de Datos II"
   description: "Curso de Estadística Inferencial y Modelado"
   site-url: https://cjjmdata.github.io/analisis_datos_ii/
-  favicon: assets/img/favicon.png
+  # favicon: assets/img/favicon.png
   navbar:
     background: primary
     left:
