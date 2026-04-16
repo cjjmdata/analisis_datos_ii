@@ -11,7 +11,7 @@ format:
     slide-number: c/t
     chalkboard: true
     logo: ../../assets/img/logo.png
-    footer: "Análisis de Datos II — Sesión 1 · 2.1 Formulación de hipótesis"
+    footer: "[⌂ Inicio](../../index.html) · Análisis de Datos II — Sesión 1 · 2.1 Formulación de hipótesis"
     incremental: false
     fig-align: center
     code-line-numbers: false
@@ -28,15 +28,48 @@ execute:
 #| label: setup
 #| include: false
 library(dplyr)
+library(readr)
 library(ggplot2)
 library(scales)
 
-# Carga de datos (ruta relativa desde slides/p3/)
-listings <- readRDS("../../datos/listings_cdmx.rds")
+# Usamos las columnas originales de Inside Airbnb (price, room_type,
+# host_neighbourhood, host_is_superhost, ...) para que los alumnos puedan
+# replicar los bloques de código palabra por palabra desde el csv crudo.
+# En clase, la ruta es el URL; aquí usamos el archivo local para agilizar
+# el render.
+listings <- read_csv("../../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE)
+
+# Guardamos el conteo crudo ANTES de limpiar para poder mostrarlo.
+n_crudo <- nrow(listings)
+
+# Limpieza mínima:
+#  1) `price` viene como texto "$1,250.00" → lo pasamos a numérico
+#  2) algunos listings no publican precio (NA) → los quitamos
+listings <- listings |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+n_limpio <- nrow(listings)
+
+# Fecha del snapshot: se saca de `last_scraped` (columna del csv crudo).
+# Usamos `max(...)` por si hubiera variación dentro del mismo snapshot.
+# `fecha_corte_iso` para URL/metadata ("2025-09-27"),
+# `fecha_corte_txt` para texto narrativo ("septiembre de 2025").
+# Construimos el mes en español manualmente para no depender del locale.
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  meses_es[as.integer(format(fecha_corte_date, "%m"))],
+  " de ", format(fecha_corte_date, "%Y")
+)
 
 # Tema de ggplot alineado con paleta del curso
 theme_curso <- function() {
-  theme_minimal(base_size = 14, base_family = "Source Sans 3") +
+  theme_minimal(base_size = 14) +
     theme(
       plot.title = element_text(face = "bold", color = "#2C3E50"),
       plot.subtitle = element_text(color = "#95A5A6"),
@@ -46,13 +79,31 @@ theme_curso <- function() {
     )
 }
 
-# Subset: solo Roma Norte (colonia dentro de Cuauhtémoc)
-# Nota: Inside Airbnb usa `neighbourhood_cleansed` con alcaldías o colonias
-# según la ciudad. Para CDMX suele ser colonia. Si el subset está vacío,
-# ajustar a `alcaldia == "Cuauhtémoc"` o revisar los niveles disponibles.
+# Subset: Roma Norte es una colonia (dentro de Cuauhtémoc).
+# Inside Airbnb la reporta en `host_neighbourhood` (~45% NA).
+# El tipo "propiedad completa" es "Entire home/apt" en `room_type`.
 roma_norte <- listings |>
-  filter(alcaldia == "Roma Norte",
-         tipo_habitacion == "Propiedad completa")
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt")
+
+# Cómputo en vivo de la prueba t para que los números del callout
+# "Recomendación preliminar" cuadren exactamente con el `t.test` que
+# sale en pantalla. (Antes leíamos `resultados_s01.rds` del notebook
+# interno, pero ese archivo usaba un pipeline con filtros distintos
+# y producía cifras ligeramente distintas → inconsistencia visible.)
+prueba_s1 <- t.test(roma_norte$price, mu = 1800,
+                    alternative = "two.sided", conf.level = 0.95)
+
+resultados <- list(
+  n                = nrow(roma_norte),
+  media_muestral   = round(mean(roma_norte$price), 0),
+  mediana_muestral = round(median(roma_norte$price), 0),
+  ic_inf           = round(prueba_s1$conf.int[1], 0),
+  ic_sup           = round(prueba_s1$conf.int[2], 0),
+  p_valor          = format.pval(prueba_s1$p.value, digits = 3),
+  fecha_corte_iso  = fecha_corte_iso,
+  fecha_corte_txt  = fecha_corte_txt
+)
 ```
 
 # Contexto del parcial {background-color="#2C3E50"}
@@ -61,7 +112,7 @@ roma_norte <- listings |>
 
 :::: {.columns}
 
-::: {.column width="55%"}
+::: {.column width="55%" style="font-size: 0.90em;"}
 Patricia acaba de heredar un departamento de 2 recámaras en **Roma Norte**.
 
 Quiere tomar tres decisiones de negocio:
@@ -70,7 +121,6 @@ Quiere tomar tres decisiones de negocio:
 2. ¿A qué precio?
 3. ¿Qué ingreso esperar?
 
-Nos ha contratado como su consultora de análisis.
 :::
 
 ::: {.column width="45%"}
@@ -87,9 +137,10 @@ Nos ha contratado como su consultora de análisis.
 | Superficie | 62 m² |
 :::
 
+Nos ha contratado como su consultora de análisis.
 ::::
 
-## La lógica del parcial
+## La lógica del parcial {.smaller}
 
 Cada sesión responde **una nueva pregunta** de Patricia. El análisis se hace más sofisticado semana a semana.
 
@@ -112,7 +163,7 @@ Cada sesión responde **una nueva pregunta** de Patricia. El análisis se hace m
 Este tipo de afirmación —una cifra publicada en un medio que alguien quiere usar como base de decisión— es **el disparador natural** de una prueba de hipótesis.
 :::
 
-## De pregunta de negocio a pregunta analítica
+## De pregunta de negocio a pregunta analítica {.smaller}
 
 La pregunta de Patricia en español:
 
@@ -140,7 +191,7 @@ Formato:
 
 Siempre involucra un parámetro (μ, p, σ) y un valor de referencia.
 
-## Las dos hipótesis
+## Las dos hipótesis {.smaller}
 
 Toda prueba contrasta **dos** afirmaciones mutuamente excluyentes:
 
@@ -149,6 +200,8 @@ $H_0$ : [Hipótesis nula]{.concepto}
 
 $H_1$ : [Hipótesis alternativa]{.concepto}
 : La afirmación que adoptaríamos si rechazamos $H_0$. Representa lo que sospechamos o queremos demostrar.
+
+<br>
 
 ::: {.callout-important}
 Nunca "aceptamos" $H_0$. La rechazamos o **no logramos rechazarla**. Es una asimetría fundamental de la prueba.
@@ -173,18 +226,20 @@ En cualquier decisión bajo incertidumbre, se puede equivocar uno:
 | **Rechazo $H_0$** | Error Tipo I (α) | ✔ Correcto |
 | **No rechazo $H_0$** | ✔ Correcto | Error Tipo II (β) |
 
-## El costo del error, para Patricia
+## El costo del error, para Patricia {.smaller}
 
 Piensa el costo de negocio de cada error:
 
 - **Tipo I (rechazamos cuando era cierto)** → le decimos a Patricia que $1,800 no es realista, cuando sí lo era. Ella ajusta innecesariamente.
 - **Tipo II (no rechazamos cuando era falso)** → dejamos pasar que la cifra era incorrecta. Patricia basa decisiones en un dato erróneo.
 
+<br>
+
 ::: {.callout-note}
 En negocios, el costo de los dos errores rara vez es simétrico. **Parte del trabajo del analista es explicitar qué error es más grave** en cada caso.
 :::
 
-## Nivel de significancia α
+## Nivel de significancia α {.smaller}
 
 El [nivel de significancia]{.concepto} $\alpha$ es la **probabilidad máxima de Error Tipo I** que estamos dispuestos a tolerar.
 
@@ -198,21 +253,98 @@ Valores convencionales:
 0.05 no es mágico. Es una convención razonable para muchos contextos, pero **no es un mandato**. En decisiones de alto impacto, pedir más evidencia (α más bajo) es sensato.
 :::
 
-## El p-valor
+## El p-valor {.t-70}
 
-El [p-valor]{.concepto} es la probabilidad de observar datos **tan o más extremos** que los que tenemos, **suponiendo que $H_0$ es verdadera**.
+El [p-valor]{.concepto} responde a **una** pregunta muy específica:
 
-Regla de decisión:
+> *"Si $H_0$ fuera verdadera, ¿qué tan raro sería haber observado los datos que observamos?"*
+
+::: {style="font-size: 0.75em;"}
+**Aterrizado a Patricia.** Supongamos —sólo por el argumento— que la media poblacional en Roma Norte *sí* es \$1,800 ($H_0$). En nuestra muestra observamos una media de \$`r format(resultados$media_muestral, big.mark=",")`. El p-valor mide **qué tan probable era obtener una muestra así de alejada de \$1,800, si \$1,800 fuera la verdad**.
+
+- p-valor **pequeño** → "sería rarísimo ver \$`r format(resultados$media_muestral, big.mark=",")` si la verdad fuera \$1,800" → **rechazamos $H_0$**.
+- p-valor **grande** → "\$`r format(resultados$media_muestral, big.mark=",")` es plausible incluso si la verdad fuera \$1,800" → no hay evidencia suficiente.
 
 $$p\text{-valor} < \alpha \implies \text{rechazamos } H_0$$
+:::
 
 ::: {.callout-important}
-El p-valor **NO es** la probabilidad de que $H_0$ sea cierta. Es la probabilidad de los datos, **dada** $H_0$. Confundir esto es el error más común en la interpretación.
+El p-valor **NO es** la probabilidad de que $H_0$ sea cierta. Es la probabilidad de **los datos**, *asumiendo* $H_0$. Confundirlos es el error de interpretación más común.
 :::
 
 # Aplicación al caso Patricia {background-color="#18BC9C"}
 
-## Los datos de Roma Norte
+## De dónde vienen los datos {.smaller}
+
+Trabajamos con **Inside Airbnb**, un proyecto público que publica snapshots reales de la plataforma bajo licencia CC-BY. Usamos el corte **Ciudad de México · `r resultados$fecha_corte_iso`**.
+
+::: {.panel-tabset style="font-size: 1.2em;"}
+
+## 💻 Código
+
+```{.r}
+library(readr)
+library(dplyr)
+
+url <- paste0(
+  "https://data.insideairbnb.com/mexico/df/mexico-city/",
+  "2025-09-27/data/listings.csv.gz")
+
+listings <- read_csv(url, show_col_types = FALSE)
+
+# `price` viene como texto ("$1,250.00"); lo pasamos a numérico.
+listings <- listings |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+dim(listings)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+cat("Descarga: ~40 MB · se hace una sola vez por sesión.\n\n")
+cat(sprintf("Listings en el archivo crudo:        %s\n",
+            format(n_crudo, big.mark = ",")))
+cat(sprintf("Listings tras quitar los de price=NA: %s  (drop de %s)\n\n",
+            format(n_limpio, big.mark = ","),
+            format(n_crudo - n_limpio, big.mark = ",")))
+cat("Primeras columnas disponibles en el dataset:\n")
+print(head(names(listings), 12))
+```
+
+:::
+
+## Cómo van a replicar esto {.smaller}
+
+La idea de esta sesión es que cada paso que hagamos aquí **lo tecleen al mismo tiempo en su propio notebook**. Así salen de clase con un análisis reproducible.
+
+1. Abran su notebook (`.ipynb` con kernel de R) **antes** de que avancemos.
+2. Corran el bloque de descarga de la slide anterior. Es la parte más lenta: déjenlo descargando y sigan con los conceptos.
+3. En cada slide con pestaña `💻 Código`, copien el bloque a una celda y ejecútenlo.
+4. En cada resultado, comparen que les da lo mismo que en pantalla.
+
+::: {.callout-important appearance="minimal"}
+**Realismo, no sincronía perfecta.** Si su descarga se atora o se equivocaron en una línea, *no se bloqueen*: avancen con las slides, regresen cuando el objeto esté listo. El entregable al final es tener el resultado de la prueba t y la recomendación a Patricia —no haber ejecutado todo al mismo tiempo que yo.
+:::
+
+## La secuencia de análisis de hoy {.smaller}
+
+Así se ve el flujo de una consultora real cuando atiende a una clienta como Patricia. Nosotros lo vamos a recorrer completo en esta sesión:
+
+| # | Paso | Qué hacemos | Por qué |
+|:-:|:---|:---|:---|
+| 1 | Obtener datos | `read_csv()` desde Inside Airbnb | Base común, trazable |
+| 2 | Limpiar lo mínimo | `price` → numérico | Sin eso no se calcula nada |
+| 3 | Filtrar el subset | Roma Norte + propiedad completa | Aislar el mercado de Patricia |
+| 4 | Explorar | Descriptivos + histograma | Ver antes de calcular |
+| 5 | Formular $H_0,\,H_1$ | Traducir la afirmación del artículo | El trabajo analítico real |
+| 6 | Ejecutar prueba | `t.test()` de una muestra | El cálculo en sí |
+| 7 | Interpretar | p-valor + IC en pesos | La decisión |
+| 8 | Comunicar | Memo de 150 palabras | Lo que Patricia se lleva |
+
+## Los datos de Roma Norte {.smaller}
 
 Antes de la prueba, siempre exploramos los datos. ¿Qué vemos?
 
@@ -220,21 +352,23 @@ Antes de la prueba, siempre exploramos los datos. ¿Qué vemos?
 
 ## 💻 Código
 
+::: {style="font-size: 1.20em;"}
 ```{.r}
 roma_norte <- listings |>
-  filter(alcaldia == "Roma Norte",
-         tipo_habitacion == "Propiedad completa")
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt")
 
 roma_norte |>
   summarise(
     n           = n(),
-    media       = mean(precio),
-    mediana     = median(precio),
-    desv_est    = sd(precio),
-    precio_min  = min(precio),
-    precio_max  = max(precio)
+    media       = mean(price),
+    mediana     = median(price),
+    desv_est    = sd(price),
+    minimo      = min(price),
+    maximo      = max(price)
   )
 ```
+:::
 
 ## 📊 Resultado
 
@@ -243,11 +377,11 @@ roma_norte |>
 roma_norte |>
   summarise(
     n           = n(),
-    media       = round(mean(precio), 0),
-    mediana     = round(median(precio), 0),
-    desv_est    = round(sd(precio), 0),
-    precio_min  = min(precio),
-    precio_max  = max(precio)
+    media       = round(mean(price), 0),
+    mediana     = round(median(price), 0),
+    desv_est    = round(sd(price), 0),
+    minimo      = min(price),
+    maximo      = max(price)
   ) |>
   knitr::kable(
     col.names = c("n", "Media", "Mediana", "Desv. est.",
@@ -258,19 +392,20 @@ roma_norte |>
 
 :::
 
-## Distribución del precio en Roma Norte
+## Distribución del precio en Roma Norte {.smaller}
 
 ::: {.panel-tabset}
 
 ## 💻 Código
 
+::: {style="font-size: 1.40em;"}
 ```{.r}
-ggplot(roma_norte, aes(x = precio)) +
+ggplot(roma_norte, aes(x = price)) +
   geom_histogram(bins = 40, fill = "#18BC9C",
                  color = "white", alpha = 0.8) +
   geom_vline(xintercept = 1800, color = "#E74C3C",
              linewidth = 1, linetype = "dashed") +
-  geom_vline(xintercept = mean(roma_norte$precio),
+  geom_vline(xintercept = mean(roma_norte$price),
              color = "#2C3E50", linewidth = 1) +
   annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
            color = "#E74C3C", hjust = -0.1, vjust = 2) +
@@ -282,6 +417,7 @@ ggplot(roma_norte, aes(x = precio)) +
     y = "Número de listings"
   )
 ```
+:::
 
 ## 📊 Resultado
 
@@ -289,12 +425,12 @@ ggplot(roma_norte, aes(x = precio)) +
 #| echo: false
 #| fig-width: 9
 #| fig-height: 4.5
-ggplot(roma_norte, aes(x = precio)) +
+ggplot(roma_norte, aes(x = price)) +
   geom_histogram(bins = 40, fill = "#18BC9C",
                  color = "white", alpha = 0.8) +
   geom_vline(xintercept = 1800, color = "#E74C3C",
              linewidth = 1, linetype = "dashed") +
-  geom_vline(xintercept = mean(roma_norte$precio),
+  geom_vline(xintercept = mean(roma_norte$price),
              color = "#2C3E50", linewidth = 1) +
   annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
            color = "#E74C3C", hjust = -0.1, vjust = 2) +
@@ -310,16 +446,16 @@ ggplot(roma_norte, aes(x = precio)) +
 
 :::
 
-## Ejecutamos la prueba
+## Ejecutamos la prueba {.smaller}
 
-::: {.panel-tabset}
+::: {.panel-tabset style="font-size: 1.20em;"}
 
 ## 💻 Código
 
 ```{.r}
 # Prueba t de una muestra, bilateral (≠)
 t.test(
-  x           = roma_norte$precio,
+  x           = roma_norte$price,
   mu          = 1800,
   alternative = "two.sided",
   conf.level  = 0.95
@@ -331,7 +467,7 @@ t.test(
 ```{r}
 #| echo: false
 t.test(
-  x           = roma_norte$precio,
+  x           = roma_norte$price,
   mu          = 1800,
   alternative = "two.sided",
   conf.level  = 0.95
@@ -340,7 +476,7 @@ t.test(
 
 :::
 
-## Lectura responsable del output
+## Lectura profesional del output
 
 Tres cosas que debes **siempre** reportar, en este orden:
 
@@ -350,20 +486,18 @@ Tres cosas que debes **siempre** reportar, en este orden:
 
 No reportes solo "p < 0.05". Eso no es un análisis, es un trámite.
 
-## ¿Qué le decimos a Patricia?
+## ¿Qué le decimos a Patricia? {.smaller}
 
 Una versión profesional de la comunicación:
 
 ::: {.callout-note}
-**Recomendación preliminar.** Con base en 897 propiedades completas listadas en Roma Norte al cierre de septiembre 2025, el precio promedio observado es de \$2,450 MXN por noche, con intervalo de confianza al 95% entre \$2,380 y \$2,520. La cifra de \$1,800 mencionada en el artículo está **fuera** de ese intervalo, por lo que no recomendamos usarla como referencia. La mediana de \$2,200 puede ser una referencia más robusta si el mercado presenta asimetría (lo cual se observa en los datos).
+**Recomendación preliminar.** Con base en `r format(resultados$n, big.mark=",")` propiedades completas listadas en Roma Norte al corte de `r resultados$fecha_corte_txt`, el precio promedio observado es de \$`r format(resultados$media_muestral, big.mark=",")` MXN por noche, con intervalo de confianza al 95% entre \$`r format(resultados$ic_inf, big.mark=",")` y \$`r format(resultados$ic_sup, big.mark=",")`. La cifra de \$1,800 mencionada en el artículo está **fuera** de ese intervalo (p = `r resultados$p_valor`), por lo que no recomendamos usarla como referencia. La mediana observada de \$`r format(resultados$mediana_muestral, big.mark=",")` puede ser una referencia más robusta dada la asimetría típica del mercado.
 :::
 
-*(Los números exactos los confirman con la ejecución en clase.)*
-
-## Lo que esta prueba NO le dice a Patricia
+## Lo que esta prueba NO le dice a Patricia {.smaller}
 
 ::: {.callout-important}
-La prueba confirma que \$1,800 **no es la media** del mercado. **No nos dice:**
+La prueba confirma que \$1,800 **no es la media** del mercado. Pero **NO nos dice:**
 
 - Qué precio cobrar en su propiedad específica
 - Si su ubicación dentro de Roma Norte es mejor o peor que el promedio
@@ -373,30 +507,9 @@ La prueba confirma que \$1,800 **no es la media** del mercado. **No nos dice:**
 Cada una de esas preguntas requiere un análisis distinto. Las iremos trabajando en las próximas sesiones.
 :::
 
-# Auditoría IA-era {background-color="#F39C12"}
-
-## ¿Qué haría un LLM sin supervisión con este problema?
-
-Un LLM (ChatGPT, Claude, etc.) respondería la pregunta ejecutando el mismo código que nosotros. **El riesgo no es el cálculo; son las decisiones alrededor.**
-
-Errores típicos que un LLM **comete sin darse cuenta**:
-
-- Aplicar t-test sin verificar supuestos (normalidad, outliers)
-- No considerar que `precio` es altamente asimétrico (mediana ≠ media)
-- Interpretar $p < 0.05$ como "la afirmación es falsa" (es más matizado)
-- Omitir el contexto de negocio al comunicar el hallazgo
-
-## Tu rol como analista
-
-::: {.callout-note appearance="minimal"}
-La IA ejecuta. Tú diriges: defines la pregunta, verificas supuestos, interpretas en contexto, comunicas con incertidumbre.
-
-**La pregunta no es "¿puede la IA hacer mi análisis?". Es "¿puedo yo detectar cuando el análisis está mal, aunque lo haya hecho la IA?".**
-:::
-
 # Actividad para notebook {background-color="#2C3E50"}
 
-## Lo que harán en su notebook
+## Lo que harán en su notebook {.t-60}
 
 Repliquen este análisis en su propio `.ipynb`:
 
@@ -418,7 +531,7 @@ Tres comparaciones, tres pruebas distintas. **Sesión 2: pruebas de dos muestras
 
 # Recapitulación {background-color="#18BC9C"}
 
-## Llevaron hoy
+## Llevaron hoy {.smaller}
 
 1. El [marco conceptual]{.concepto} de prueba de hipótesis: $H_0$, $H_1$, errores tipo I y II, $\alpha$, p-valor.
 2. Cómo traducir una pregunta de negocio a una prueba estadística.

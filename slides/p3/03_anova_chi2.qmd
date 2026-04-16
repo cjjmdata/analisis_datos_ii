@@ -1,0 +1,632 @@
+---
+title: "ANOVA y χ²: comparar más de dos grupos"
+subtitle: "Sesión 3 · Parcial 3 · Análisis de Datos II"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "[⌂ Inicio](../../index.html) · Análisis de Datos II — Sesión 3 · 3.1–3.2 ANOVA · 4.1–4.3 χ²"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+
+# Mismo pipeline que S1 y S2: csv crudo, nombres originales, limpieza mínima.
+listings <- read_csv("../../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+# Fecha de corte (dinámica, desde la propia base)
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+# Tema de ggplot del curso
+theme_curso <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      axis.title = element_text(color = "#2C3E50"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+
+# ---- Subset de 4 zonas con factor ordenado ----
+zonas <- c("Roma Norte", "Condesa", "Polanco", "Del Valle")
+d <- listings |>
+  filter(host_neighbourhood %in% zonas) |>
+  mutate(host_neighbourhood = factor(host_neighbourhood, levels = zonas))
+
+# ---- Resumen descriptivo ----
+resumen_zonas <- d |>
+  group_by(host_neighbourhood) |>
+  summarise(
+    n       = n(),
+    media   = round(mean(price), 0),
+    mediana = round(median(price), 0),
+    de      = round(sd(price), 0),
+    .groups = "drop"
+  )
+
+# ---- ANOVA Welch ----
+welch_anova <- oneway.test(price ~ host_neighbourhood,
+                           data = d, var.equal = FALSE)
+
+# ---- ANOVA clásica + Tukey HSD ----
+m_aov <- aov(price ~ host_neighbourhood, data = d)
+tukey <- TukeyHSD(m_aov)
+tk <- as.data.frame(tukey$host_neighbourhood) |>
+  tibble::rownames_to_column("par") |>
+  mutate(across(where(is.numeric), \(x) round(x, 0)))
+
+# ---- χ² bondad de ajuste ----
+rn <- d |>
+  filter(host_neighbourhood == "Roma Norte") |>
+  mutate(tipo = if_else(room_type == "Entire home/apt",
+                        "Entire", "No_Entire"))
+obs_rn <- table(rn$tipo)
+chi_bondad <- chisq.test(obs_rn, p = c(0.70, 0.30))
+
+# ---- χ² contingencia zona × tipo ----
+d2 <- d |>
+  mutate(tipo = if_else(room_type == "Entire home/apt",
+                        "Entire", "No_Entire"))
+tbl <- table(d2$host_neighbourhood, d2$tipo)
+chi_cont <- chisq.test(tbl)
+
+# ---- Lista `resultados` que usan los callouts del slide ----
+resultados <- list(
+  fecha_corte_iso = fecha_corte_iso,
+  fecha_corte_txt = fecha_corte_txt,
+  n_total         = nrow(d),
+  n_roma          = resumen_zonas$n[resumen_zonas$host_neighbourhood == "Roma Norte"],
+  n_condesa       = resumen_zonas$n[resumen_zonas$host_neighbourhood == "Condesa"],
+  n_polanco       = resumen_zonas$n[resumen_zonas$host_neighbourhood == "Polanco"],
+  n_delvalle      = resumen_zonas$n[resumen_zonas$host_neighbourhood == "Del Valle"],
+  media_roma      = resumen_zonas$media[resumen_zonas$host_neighbourhood == "Roma Norte"],
+  media_condesa   = resumen_zonas$media[resumen_zonas$host_neighbourhood == "Condesa"],
+  media_polanco   = resumen_zonas$media[resumen_zonas$host_neighbourhood == "Polanco"],
+  media_delvalle  = resumen_zonas$media[resumen_zonas$host_neighbourhood == "Del Valle"],
+  welch_f         = round(welch_anova$statistic, 1),
+  welch_p         = format.pval(welch_anova$p.value, digits = 3, eps = 1e-16),
+  dif_polanco_roma = abs(tk$diff[tk$par == "Roma Norte-Polanco"]),
+  dif_roma_delvalle = abs(tk$diff[tk$par == "Roma Norte-Del Valle"]),
+  p_roma_condesa   = round(tk$`p adj`[tk$par == "Roma Norte-Condesa"], 3),
+  prop_entire_rn   = round(100 * obs_rn[["Entire"]] / sum(obs_rn), 0),
+  bondad_p         = format.pval(chi_bondad$p.value, digits = 3, eps = 1e-16),
+  cont_x2          = round(chi_cont$statistic, 1),
+  cont_df          = as.integer(chi_cont$parameter),
+  cont_p           = format.pval(chi_cont$p.value, digits = 3, eps = 1e-16)
+)
+```
+
+# Recapitulación {background-color="#2C3E50"}
+
+## Lo que llevamos con [Patricia]{.patricia}
+
+**Sesión 1** — Validamos una afirmación del mercado (\$1,800 como precio promedio en Roma Norte) con una prueba **t de una muestra**.
+
+**Sesión 2** — Comparamos pares: completo vs. cuarto, superhost vs. no, Roma vs. Condesa — con pruebas **t y de proporciones de dos muestras**.
+
+En ambos casos comparábamos **dos grupos** (o uno contra una referencia fija).
+
+## Hoy: Patricia tiene una pregunta que no entra en ese molde {.smaller}
+
+> *"Gracias por las comparaciones. Pero mi decisión real no es Roma vs Condesa: es si mi zona está bien posicionada contra **todas** las alcaldías que estoy considerando. Quiero comparar **Roma Norte, Condesa, Polanco y Del Valle a la vez**. Y de paso: ¿el tipo de propiedad tiene que ver con la zona? Polanco suena a 'puros deptos completos', no sé si eso es real o un prejuicio mío."*
+
+Dos preguntas, dos herramientas nuevas:
+
+1. Comparar **medias entre 4 grupos** → **ANOVA**
+2. Asociar **dos variables categóricas** (zona × tipo) → **χ²**
+
+## ¿Por qué no simplemente hacer 6 pruebas t? {.smaller}
+
+Con 4 zonas, los pares son: Roma-Condesa, Roma-Polanco, Roma-Del Valle, Condesa-Polanco, Condesa-Del Valle, Polanco-Del Valle → **6 pruebas**.
+
+::: {.callout-important}
+**Problema del error tipo I inflado.** Si cada t-test usa $\alpha = 0.05$, la probabilidad de que al menos *una* de las 6 pruebas dé un "falso positivo" es mucho mayor que 0.05. Aproximadamente:
+
+$$1 - (1 - 0.05)^6 \approx 0.26$$
+
+Un 26% de probabilidad de declarar "significativa" una diferencia inexistente. Inaceptable.
+:::
+
+El **ANOVA** resuelve esto: una sola prueba con un solo $\alpha$, que pregunta *"¿hay alguna diferencia entre los grupos?"*. Si la respuesta es sí, después (y solo después) investigamos *cuáles pares*.
+
+# ANOVA unidireccional {background-color="#18BC9C"}
+
+## La intuición del ANOVA {.smaller}
+
+El ANOVA compara **dos fuentes de variación**:
+
+::: {.columns}
+::: {.column width="50%"}
+**Varianza entre grupos**
+Qué tan distintas son las medias de los grupos entre sí.
+
+Si las zonas tuvieran precios muy diferentes, esta varianza sería grande.
+:::
+::: {.column width="50%"}
+**Varianza dentro de grupos**
+Qué tanto varían los precios *dentro* de cada zona.
+
+Es el "ruido de fondo" natural de cada mercado.
+:::
+:::
+
+<br>
+
+El estadístico **F** es, conceptualmente, un cociente:
+
+$$F = \frac{\text{Varianza ENTRE grupos}}{\text{Varianza DENTRO de grupos}}$$
+
+Si F es grande, las diferencias entre zonas son grandes *comparadas con el ruido*. Eso es evidencia de que al menos una zona difiere.
+
+## Las hipótesis
+
+$$H_0: \; \mu_{\text{Roma}} = \mu_{\text{Condesa}} = \mu_{\text{Polanco}} = \mu_{\text{Del Valle}}$$
+$$H_1: \; \text{al menos una media difiere de las demás}$$
+
+::: {.callout-note}
+Ojo al planteo de $H_1$: **no** dice "todas son diferentes" ni especifica cuál. Solo dice "no todas son iguales". Decir cuáles pares difieren es un segundo paso (post-hoc).
+:::
+
+## Los datos de las 4 zonas {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+zonas <- c("Roma Norte", "Condesa", "Polanco", "Del Valle")
+
+d <- listings |>
+  filter(host_neighbourhood %in% zonas) |>
+  mutate(host_neighbourhood = factor(host_neighbourhood,
+                                     levels = zonas))
+
+d |>
+  group_by(host_neighbourhood) |>
+  summarise(
+    n       = n(),
+    media   = mean(price),
+    mediana = median(price),
+    de      = sd(price)
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+resumen_zonas |>
+  knitr::kable(
+    col.names = c("Zona", "n", "Media", "Mediana", "Desv. est."),
+    format.args = list(big.mark = ",")
+  )
+```
+
+:::
+
+## Una nota rápida sobre las etiquetas {.smaller}
+
+El campo `host_neighbourhood` es **texto libre declarado por el host**. Además de los nombres limpios existen variantes menores (`Roma norte`, `ROMA NORTE`, `Hipódromo Condesa`). Para mantener el análisis reproducible en una sola línea de filtro, **no las consolidamos**: usamos solo los cuatro nombres con la ortografía exacta.
+
+::: {.callout-note appearance="minimal"}
+Decisión metodológica que conviene declarar al reportar: "trabajamos con los listings cuyo `host_neighbourhood` coincide exactamente con Roma Norte, Condesa, Polanco o Del Valle; las variantes ortográficas (~3%) se excluyen". Esto no sesga materialmente los resultados, pero es parte del *qué hicimos y qué no* que siempre se reporta.
+:::
+
+## Distribución por zona {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+d |>
+  ggplot(aes(x = host_neighbourhood, y = price,
+             fill = host_neighbourhood)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.25) +
+  scale_y_continuous(labels = label_comma(),
+                     limits = c(0, 6000)) +
+  scale_fill_manual(values = c("#18BC9C", "#3498DB",
+                               "#F39C12", "#E74C3C")) +
+  labs(x = NULL, y = "Precio (MXN por noche)",
+       title = "Precio por zona") +
+  theme(legend.position = "none")
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 4.8
+d |>
+  ggplot(aes(x = host_neighbourhood, y = price,
+             fill = host_neighbourhood)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.25) +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 6000)) +
+  scale_fill_manual(values = c("#18BC9C", "#3498DB", "#F39C12", "#E74C3C")) +
+  labs(x = NULL, y = "Precio (MXN por noche)",
+       title = "Precio por zona",
+       subtitle = paste0("Inside Airbnb · corte ", fecha_corte_iso)) +
+  theme_curso() +
+  theme(legend.position = "none")
+```
+
+:::
+
+## Verificando supuestos {.smaller}
+
+El ANOVA clásico asume **varianzas iguales entre grupos**. Veamos:
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+d |>
+  group_by(host_neighbourhood) |>
+  summarise(
+    n  = n(),
+    de = sd(price)
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+d |>
+  group_by(host_neighbourhood) |>
+  summarise(n = n(), de = round(sd(price), 0)) |>
+  knitr::kable(col.names = c("Zona", "n", "Desv. est."),
+               format.args = list(big.mark = ","))
+```
+
+:::
+
+Del Valle tiene una desviación estándar **~3 veces menor** que Polanco o Roma Norte. El supuesto no se cumple.
+
+::: {.callout-important}
+**Usamos Welch ANOVA por default.** Es el análogo multi-grupo del Welch t-test de S2: robusto ante varianzas desiguales. En R: `oneway.test(..., var.equal = FALSE)`.
+:::
+
+## Ejecución: Welch ANOVA {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+oneway.test(
+  price ~ host_neighbourhood,
+  data      = d,
+  var.equal = FALSE
+)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+oneway.test(price ~ host_neighbourhood, data = d, var.equal = FALSE)
+```
+
+:::
+
+**F = `r resultados$welch_f`**, p-valor ≈ `r resultados$welch_p`. Rechazamos $H_0$: al menos una zona difiere. **Pero el F global no nos dice cuál.**
+
+## ¿Qué pares difieren? Tukey HSD {.smaller}
+
+Después de un ANOVA significativo, usamos un **post-hoc** para identificar los pares. El más común es **Tukey HSD**, que ajusta los p-valores para controlar el error tipo I a lo largo de las 6 comparaciones.
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+m <- aov(price ~ host_neighbourhood, data = d)
+TukeyHSD(m)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+tk |>
+  knitr::kable(
+    col.names = c("Par", "Dif. (MXN)", "IC inf.", "IC sup.", "p ajust."),
+    format.args = list(big.mark = ",")
+  )
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+Tukey HSD asume varianzas iguales. Con heterocedasticidad moderada sus p-valores son aproximaciones razonables; el análogo formal es Games-Howell. Para una lectura de negocios, los patrones de "significativo vs. no" coinciden casi siempre.
+:::
+
+## Lectura de negocio de Tukey {.smaller}
+
+::: {.callout-note}
+**Recomendación preliminar para Patricia.**
+
+Sobre `r format(resultados$n_total, big.mark=",")` listings al corte de `r resultados$fecha_corte_txt`:
+
+- **Roma Norte (~\$`r format(resultados$media_roma, big.mark=",")`) y Condesa (~\$`r format(resultados$media_condesa, big.mark=",")`) son estadísticamente indistinguibles** en precio medio (p ajustado = `r resultados$p_roma_condesa`). Tu vecina y tú estamos en el mismo mercado.
+- **Polanco (~\$`r format(resultados$media_polanco, big.mark=",")`) es más cara que Roma Norte** por ≈ \$`r format(resultados$dif_polanco_roma, big.mark=",")` MXN/noche (significativo).
+- **Del Valle (~\$`r format(resultados$media_delvalle, big.mark=",")`) es más barata que Roma Norte** por ≈ \$`r format(resultados$dif_roma_delvalle, big.mark=",")` MXN/noche (significativo).
+- Tu posición en el "ranking de precio medio": **#2 de 4**, empatada con Condesa, detrás de Polanco.
+:::
+
+## Lo que ANOVA **no** le dice a Patricia {.smaller}
+
+::: {.callout-important}
+- **No dice que "estar en Polanco haría su depto más caro"**. Podría ser que las propiedades en Polanco sean *sistemáticamente distintas* (más grandes, mejor amuebladas, mejor ubicadas). La asociación zona-precio no es necesariamente causal.
+- **No dice nada sobre la ocupación**. Puede ser que Polanco cobre más pero se ocupe menos. El *ingreso* es precio × ocupación, y esa cuenta la veremos más adelante.
+- **No dice nada sobre SU propiedad específica.** Son promedios de mercado.
+
+La diferencia entre "asociación" y "causa" es el tema central que retomaremos en la S6 (regresión simple III) y la S7 (múltiple).
+:::
+
+# ANOVA bidireccional — extensión {background-color="#F39C12"}
+
+## Cuando dos factores actúan a la vez {.smaller}
+
+Hasta ahora: un factor (zona). Pero en la realidad, el precio depende de **varios factores simultáneamente**. El ANOVA **bidireccional** (o *factorial*) es la extensión natural para **dos factores categóricos** a la vez.
+
+Tres preguntas que responde:
+
+1. ¿Hay efecto del **factor A** (zona)?
+2. ¿Hay efecto del **factor B** (tipo de habitación)?
+3. ¿Hay **interacción**? Es decir, ¿el efecto del tipo de habitación *depende* de la zona?
+
+::: {.callout-note appearance="minimal"}
+**Intuición de la interacción.** "En Polanco el premio por rentar completo es \$X; en Del Valle el premio es \$Y. Si X ≠ Y, hay interacción — el efecto de un factor depende del nivel del otro."
+:::
+
+## Cómo se ve en R (conceptual) {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+aov(
+  price ~ host_neighbourhood * room_type,
+  data = d |>
+    filter(room_type %in%
+           c("Entire home/apt", "Private room"))
+) |> summary()
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+aov(price ~ host_neighbourhood * room_type,
+    data = d |>
+      filter(room_type %in% c("Entire home/apt", "Private room"))) |>
+  summary()
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+No calculamos F ni sumas de cuadrados a mano — el mensaje para S3 es **que existen modelos factoriales y que la sintaxis en R es mínima**. Cuando lleguemos a regresión múltiple (S7) retomaremos esta lógica con variables continuas.
+:::
+
+# χ² — bondad de ajuste {background-color="#2C3E50"}
+
+## Cambio de escenario {.smaller}
+
+Hasta ahora: pruebas sobre **medias** (números continuos). Ahora: pruebas sobre **proporciones** y **composiciones** (categorías).
+
+**Bondad de ajuste** responde: *"¿la distribución observada en una variable categórica se apega a una distribución de referencia?"*
+
+Es el análogo categórico del artículo de S1 (\$1,800): una afirmación publicada, un dato nuestro, una prueba.
+
+## Caso: el mix de Roma Norte {.smaller}
+
+Un reporte de mercado publicado antes del corte actual afirmaba que en Roma Norte el mix era:
+
+- **70%** propiedad completa (`Entire home/apt`)
+- **30%** el resto (cuartos privados, hoteles, etc.)
+
+Pregunta: ¿se apega la realidad del corte de `r resultados$fecha_corte_txt`?
+
+$$H_0: \; p_{\text{Entire}} = 0.70, \; p_{\text{No Entire}} = 0.30$$
+$$H_1: \; \text{al menos una proporción difiere}$$
+
+## Ejecución {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+rn <- d |>
+  filter(host_neighbourhood == "Roma Norte") |>
+  mutate(tipo = if_else(room_type == "Entire home/apt",
+                        "Entire", "No_Entire"))
+
+obs_rn <- table(rn$tipo)
+obs_rn
+
+chisq.test(obs_rn, p = c(0.70, 0.30))
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+cat("Observado en Roma Norte:\n")
+print(obs_rn)
+cat("\n")
+chisq.test(obs_rn, p = c(0.70, 0.30))
+```
+
+:::
+
+**Lectura**: la proporción observada es **`r resultados$prop_entire_rn`% Entire**, bastante por encima del 70% que afirmaba el reporte. p-valor ≈ `r resultados$bondad_p` → **rechazamos la afirmación**. El mercado de Roma Norte está más concentrado en propiedad completa de lo que decía la referencia.
+
+# χ² — contingencia {background-color="#18BC9C"}
+
+## La pregunta de Patricia {.smaller}
+
+> *"¿El tipo de propiedad se relaciona con la zona? ¿Polanco es más 'depto completo' que Roma Norte?"*
+
+Formalmente:
+
+$$H_0: \; \text{tipo y zona son independientes}$$
+$$H_1: \; \text{hay asociación entre tipo y zona}$$
+
+::: {.callout-note appearance="minimal"}
+**Consolidación necesaria.** `Hotel room` y `Shared room` tienen conteos muy bajos — haría que χ² emita advertencias por celdas esperadas < 5. Colapsamos a **dos categorías**: `Entire` vs. `No_Entire`. Esto además hace la interpretación más directa.
+:::
+
+## Tabla observada {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+d2 <- d |>
+  mutate(tipo = if_else(room_type == "Entire home/apt",
+                        "Entire", "No_Entire"))
+
+tbl <- table(d2$host_neighbourhood, d2$tipo)
+tbl
+
+# Proporción de "Entire" por zona
+prop.table(tbl, margin = 1) |> round(3)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+cat("Conteos observados:\n")
+print(tbl)
+cat("\nProporción por zona (fila):\n")
+print(round(prop.table(tbl, margin = 1), 3))
+```
+
+:::
+
+## Ejecución {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+chi_cont <- chisq.test(tbl)
+chi_cont
+
+# Verificar que todas las celdas esperadas sean ≥ 5
+chi_cont$expected |> round(1)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+chi_cont2 <- chisq.test(tbl)
+chi_cont2
+cat("\nValores esperados (todos ≥ 5, supuesto OK):\n")
+print(round(chi_cont2$expected, 1))
+```
+
+:::
+
+**X² = `r resultados$cont_x2`**, df = `r resultados$cont_df`, p ≈ `r resultados$cont_p`.
+
+## Lectura de negocio {.smaller}
+
+::: {.callout-note}
+**Recomendación para Patricia.**
+
+La composición del mercado **sí depende de la zona** (χ² ≈ `r resultados$cont_x2`, p ≈ `r resultados$cont_p`).
+
+- **Polanco (85%) y Roma Norte (83%)** están dominadas por propiedad completa. Tu producto es el *formato mainstream* de tu zona.
+- **Condesa (64%) y Del Valle (60%)** tienen mezclas más diversas, con presencia relevante de cuartos privados.
+
+**Implicación directa para ti**: listar el depto completo en Roma Norte no es un posicionamiento diferenciador — es el estándar. Eso significa que competirás con muchos otros deptos completos, y que la diferenciación tendrá que venir de atributos más finos (tamaño, amenidades, fotos, reseñas), no del formato.
+:::
+
+## Lo que χ² **no** le dice a Patricia {.smaller}
+
+::: {.callout-important}
+- **No dice nada sobre los precios dentro de cada celda.** Solo dice "la composición del mercado es distinta". El ANOVA (de hace 20 min) es el que habla de precio.
+- **No dice qué factor causa qué.** Si Polanco tiene más "Entire", no sabemos si es porque los hosts de Polanco eligen ese formato, o porque los cuartos privados en esa zona son inviables como negocio (diferencias estructurales del edificio, perfil del huésped, etc.).
+- **No dice nada sobre las categorías que colapsamos.** La estructura fina dentro de "No_Entire" (cuántos son cuartos, cuántos hoteles) queda oculta en esa tabla. Si eso importara para una decisión, habría que rehacer el análisis con otra segmentación.
+:::
+
+# Actividad para notebook {background-color="#2C3E50"}
+
+## Lo que harán en su notebook {.smaller}
+
+Repliquen el análisis en su propio `.ipynb`:
+
+1. Filtrar las 4 zonas desde el csv crudo.
+2. Boxplot comparativo de precio por zona.
+3. Ejecutar Welch ANOVA y Tukey HSD.
+4. Construir la tabla 4×2 de zona × (Entire / No_Entire) y correr χ².
+5. Redactar **un solo párrafo profesional** (máximo 150 palabras) que resuma los dos hallazgos para Patricia, incluyendo al menos una advertencia honesta sobre lo que el análisis NO puede concluir.
+
+# Cierre {background-color="#18BC9C"}
+
+## Lo que llevan hoy {.smaller}
+
+1. Cuando hay **más de dos grupos** a comparar, la herramienta correcta no es "varios t-tests" (inflación de α) sino **ANOVA**.
+2. El **Welch ANOVA** es el default razonable cuando las varianzas no son iguales — consistente con el criterio de S2.
+3. Un ANOVA global significativo requiere un **post-hoc (Tukey HSD)** para identificar los pares que difieren.
+4. El **χ² de bondad de ajuste** contrasta una distribución categórica observada contra una de referencia.
+5. El **χ² de contingencia** prueba independencia entre dos variables categóricas. Es el análogo categórico de lo que hicimos en S1 y S2 con medias y proporciones.
+
+## Para la próxima sesión {.smaller}
+
+Patricia ya sabe:
+
+- **Dónde** el mercado tiene precios distintos (ANOVA).
+- **Cómo se distribuye** la oferta entre tipos y zonas (χ²).
+
+Lo que le falta es el paso más concreto: **cuánto cobrar específicamente por su depto**. Para eso ya no basta con comparar grupos — necesita un *modelo* que traduzca características de una propiedad en un precio esperado.
+
+**Sesión 4: regresión lineal simple — del problema al modelo.**

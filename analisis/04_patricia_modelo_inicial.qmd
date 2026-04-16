@@ -1,0 +1,316 @@
+---
+title: "Análisis completo · Sesión 4"
+subtitle: "Regresión simple I: del problema al modelo — precio en función de recámaras"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> **Propósito de este documento.** Es el análisis completo que subyace la presentación de la Sesión 4. Se ejecuta de principio a fin con datos reales y permite: (a) validar que no haya placeholders en las slides, (b) obtener los números exactos para la narrativa profesional a Patricia, (c) servir como modelo de respuesta que los alumnos pueden consultar después de la clase.
+>
+> **No se publica en el sitio.** Vive en `analisis/` que está excluida del render.
+
+## 1. Setup
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Pipeline alineado con las slides públicas: csv crudo de Inside Airbnb,
+# nombres originales, limpieza mínima.
+listings <- read_csv("../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE)
+
+n_crudo <- nrow(listings)
+
+listings <- listings |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+n_limpio <- nrow(listings)
+
+# Fecha del snapshot
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+cat("Listings en el crudo : ", format(n_crudo,  big.mark = ","), "\n",
+    "Listings tras limpiar: ", format(n_limpio, big.mark = ","),
+    " (drop ", format(n_crudo - n_limpio, big.mark = ","), ")\n",
+    "Fecha de corte       : ", fecha_corte_iso, "\n",
+    sep = "")
+
+# Paleta del curso
+colores <- list(
+  primary = "#2C3E50",
+  accent  = "#18BC9C",
+  info    = "#3498DB",
+  warn    = "#F39C12",
+  danger  = "#E74C3C",
+  light   = "#ECF0F1"
+)
+
+# Tema de ggplot reusable
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", color = colores$primary),
+      plot.subtitle = element_text(color = "#7F8C8D"),
+      axis.title = element_text(color = colores$primary),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = colores$light)
+    )
+}
+```
+
+## 2. Subset: Roma Norte, propiedad completa
+
+El mercado de Patricia: propiedades completas (`Entire home/apt`) en Roma Norte, con información de recámaras disponible.
+
+```{r}
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms))
+
+cat("Listings en el subset (Roma Norte, Entire, bedrooms no-NA):",
+    nrow(roma), "\n")
+```
+
+## 3. Exploración: precio vs recámaras
+
+### 3.1 Distribución de recámaras
+
+```{r}
+roma |>
+  count(bedrooms) |>
+  mutate(pct = round(100 * n / sum(n), 1)) |>
+  kable(col.names = c("Recámaras", "n", "% del total"))
+```
+
+### 3.2 Precio por número de recámaras
+
+```{r}
+resumen_rec <- roma |>
+  group_by(bedrooms) |>
+  summarise(
+    n       = n(),
+    media   = round(mean(price), 0),
+    mediana = round(median(price), 0),
+    de      = round(sd(price), 0),
+    .groups = "drop"
+  )
+
+resumen_rec |>
+  kable(col.names = c("Recámaras", "n", "Media", "Mediana", "DE"),
+        format.args = list(big.mark = ","))
+```
+
+Observaciones iniciales:
+
+- Hay una relación positiva clara: más recámaras → mayor precio.
+- La mayoría de los listings tienen 1 o 2 recámaras (`r round(100 * sum(roma$bedrooms %in% c(1, 2)) / nrow(roma), 0)`% del total).
+- Las propiedades con 6+ recámaras son escasas y tienen precios muy altos — podrían influir en la pendiente del modelo.
+
+### 3.3 Diagrama de dispersión
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5.5
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.3, color = colores$accent) +
+  scale_y_continuous(labels = label_comma()) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(
+    title = "Precio por noche vs. número de recámaras",
+    subtitle = paste0("Roma Norte · Propiedad completa · n = ",
+                      nrow(roma), " · corte ", fecha_corte_iso),
+    x = "Número de recámaras",
+    y = "Precio (MXN por noche)",
+    caption = "Fuente: Inside Airbnb"
+  ) +
+  theme_curso()
+```
+
+## 4. Construcción del modelo
+
+### 4.1 Ajuste con `lm()`
+
+```{r}
+modelo <- lm(price ~ bedrooms, data = roma)
+summary(modelo)
+```
+
+### 4.2 Extracción de coeficientes
+
+```{r}
+coefs <- coef(modelo)
+b0 <- coefs[["(Intercept)"]]
+b1 <- coefs[["bedrooms"]]
+
+cat("Ecuación estimada:\n")
+cat(sprintf("  precio = %.0f + %.0f × recámaras\n", b0, b1))
+cat("\nInterpretación:\n")
+cat(sprintf("  β₀ = $%s → precio base estimado (0 recámaras)\n",
+            format(round(b0), big.mark = ",")))
+cat(sprintf("  β₁ = $%s → incremento medio por cada recámara adicional\n",
+            format(round(b1), big.mark = ",")))
+```
+
+### 4.3 R² (referencia, no se discute formalmente en S4)
+
+```{r}
+r2 <- summary(modelo)$r.squared
+cat(sprintf("R² = %.3f\n", r2))
+cat(sprintf("El modelo explica ~%.0f%% de la variación en precio.\n",
+            100 * r2))
+cat("(Esto se discutirá formalmente en S5.)\n")
+```
+
+## 5. Interpretación de coeficientes
+
+### 5.1 El intercepto (β₀)
+
+β₀ ≈ $`r format(round(b0), big.mark = ",")` MXN es el precio estimado cuando `bedrooms = 0`. En este caso, un estudio (0 recámaras) *sí existe* en el dataset (`r sum(roma$bedrooms == 0)` listings), así que el intercepto no es absurdo — aproxima razonablemente el precio de un estudio en Roma Norte.
+
+Sin embargo, la interpretación del intercepto no siempre es útil. Si el predictor fuera "metros cuadrados" y nadie renta 0 m², el intercepto sería solo un parámetro técnico sin significado práctico.
+
+### 5.2 La pendiente (β₁)
+
+β₁ ≈ $`r format(round(b1), big.mark = ",")` MXN. Por cada recámara adicional, el precio esperado por noche aumenta en ~$`r format(round(b1), big.mark = ",")`.
+
+::: {.callout-warning}
+**Esto es una asociación observada, no una relación causal.** No significa que "agregar una recámara" a un depto cause un aumento de $`r format(round(b1), big.mark = ",")`. Puede ser que los deptos con más recámaras sean más grandes, mejor ubicados, o pertenezcan a hosts más profesionales — y sean *esas* características las que expliquen el precio más alto. La distinción correlación vs. causalidad se desarrolla a fondo en S6.
+:::
+
+## 6. Predicción para Patricia
+
+### 6.1 Predicción puntual
+
+```{r}
+pred_patricia <- predict(modelo, newdata = data.frame(bedrooms = 2))
+
+cat(sprintf("Predicción para 2 recámaras: $%s MXN/noche\n",
+            format(round(pred_patricia), big.mark = ",")))
+```
+
+### 6.2 Comparación con referencias anteriores
+
+```{r}
+# Media y mediana del mercado completo (sin filtro de recámaras)
+media_global   <- round(mean(roma$price), 0)
+mediana_global <- round(median(roma$price), 0)
+
+# Media del subgrupo de 2 recámaras
+media_2rec <- round(mean(roma$price[roma$bedrooms == 2]), 0)
+
+cat("Referencias previas (S1, todo Roma Norte Entire):\n")
+cat(sprintf("  Media global  : $%s\n", format(media_global, big.mark = ",")))
+cat(sprintf("  Mediana global: $%s\n", format(mediana_global, big.mark = ",")))
+cat(sprintf("\nMedia observada en 2 recámaras: $%s\n",
+            format(media_2rec, big.mark = ",")))
+cat(sprintf("Predicción del modelo para 2 rec.: $%s\n",
+            format(round(pred_patricia), big.mark = ",")))
+```
+
+La predicción del modelo ($`r format(round(pred_patricia), big.mark = ",")`) es más específica que la media global ($`r format(media_global, big.mark = ",")`), porque incorpora información sobre el número de recámaras. Esto ilustra el salto de "referencia genérica del mercado" a "estimación condicionada a las características de la propiedad".
+
+## 7. Visualización: recta sobre los datos
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.25, color = colores$accent) +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              color = colores$primary, linewidth = 1.2) +
+  # Punto de predicción para Patricia
+  annotate("point", x = 2, y = pred_patricia,
+           color = colores$danger, size = 4) +
+  annotate("text", x = 2.3, y = pred_patricia,
+           label = paste0("Patricia: $",
+                          format(round(pred_patricia), big.mark = ",")),
+           color = colores$danger, hjust = 0, size = 4.5,
+           fontface = "bold") +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 15000)) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(
+    title = "Modelo: precio ~ recámaras",
+    subtitle = paste0("Roma Norte · Propiedad completa · n = ",
+                      nrow(roma), " · corte ", fecha_corte_iso),
+    x = "Número de recámaras",
+    y = "Precio (MXN por noche)",
+    caption = paste0("Línea: lm(price ~ bedrooms) · ",
+                     "Punto rojo: predicción para 2 recámaras")
+  ) +
+  theme_curso()
+```
+
+## 8. Recomendación para Patricia
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Primera estimación de precio basada en las características de tu propiedad**
+
+En sesiones anteriores le proporcionamos referencias genéricas del mercado en Roma Norte (media y mediana). Hoy construimos un **modelo que relaciona el precio con el número de recámaras**, lo cual nos permite dar una estimación más específica.
+
+**Resultado.** Ajustamos un modelo de regresión lineal simple sobre `r nrow(roma)` propiedades completas en Roma Norte. La ecuación estimada es:
+
+$$\text{precio} = `r format(round(b0), big.mark = ",")` + `r format(round(b1), big.mark = ",")` \times \text{recámaras}$$
+
+Para su departamento de **2 recámaras**, la estimación es **$`r format(round(pred_patricia), big.mark = ",")` MXN por noche**. Este número es más informativo que la media del mercado ($`r format(media_global, big.mark = ",")`), porque toma en cuenta una característica concreta de su propiedad.
+
+**Alcance y limitaciones.** Este es un primer modelo — solo usa una variable. No controla por otros factores que seguramente afectan el precio (amenidades, ubicación exacta, reseñas, capacidad). La precisión del modelo es limitada: hay mucha variación en precio entre propiedades con el mismo número de recámaras. La próxima sesión evaluará si el modelo es confiable y si sus supuestos se sostienen.
+
+**Lo que este modelo NO responde aún.** Si la relación entre recámaras y precio es *causal*, cuánto margen de error tiene la estimación, ni si incluir más variables mejoraría sustancialmente la predicción. Todo eso se trabaja en las sesiones 5 a 7.
+:::
+
+## 9. Preservación de resultados
+
+La slide pública `slides/p3/04_regresion_simple_1.qmd` corre su propio `lm()` en vivo dentro de su setup chunk, así que los números del slide y los de este notebook deben coincidir exactamente. Si alguna vez no cuadran, es señal de que los pipelines divergieron.
+
+```{r}
+resultados_s04 <- list(
+  # Muestra
+  n_roma_entire    = nrow(roma),
+  # Modelo
+  intercepto       = round(b0, 0),
+  pendiente        = round(b1, 0),
+  r_cuadrada       = round(r2, 3),
+  # Predicción Patricia
+  pred_2rec        = round(pred_patricia, 0),
+  # Descriptivos de referencia
+  media_global     = media_global,
+  mediana_global   = mediana_global,
+  media_2rec       = media_2rec,
+  # Contexto
+  fecha_corte_iso  = fecha_corte_iso,
+  fecha_corte_txt  = fecha_corte_txt
+)
+
+saveRDS(resultados_s04, "../datos/resultados_s04.rds")
+message("Resultados guardados en datos/resultados_s04.rds")
+```

@@ -6,7 +6,7 @@ Este archivo le da contexto a Claude Code (o cualquier asistente de IA) sobre el
 
 Sitio público del curso **Análisis de Datos II (MAT2409)**, Primavera 2026, impartido por Javier (CJJM). El curso es servicio estadístico inferencial para estudiantes de carreras de negocios (International Business, Marketing, Finanzas, Administración). Tres grupos: NRCs 80558, 80597, 80624, todos con el mismo profesor y materiales.
 
-Estamos en el **Parcial 3** (último del semestre). Lo que viene son 8 sesiones de 1.5 horas cada una.
+Estamos en el **Parcial 3** (último del semestre). Lo que viene son 8 sesiones de 1.5 horas cada una. Las evaluaciones (examen + defensa) se imparten en sesiones extra que **no están dentro del conteo de las 8 sesiones de contenido**.
 
 ## Contexto pedagógico crítico
 
@@ -25,14 +25,26 @@ Consecuencias prácticas en el diseño de materiales:
 
 Las 8 sesiones forman un caso: **Patricia Domínguez**, clienta que heredó un departamento de 2 recámaras en Roma Norte y contrató a "la consultora" (la clase) para decidir cómo rentarlo en Airbnb.
 
-- Sesión 1: Validación de afirmación del mercado (t una muestra) ✅
-- Sesión 2: Completo vs. cuarto, superhosts, Roma vs. Condesa (t/z dos muestras) ✅
-- Sesión 3: Comparación entre 4 alcaldías + asociación categórica (ANOVA + χ²) ⏳
-- Sesión 4: Auditoría en vivo de un análisis defectuoso (integradora) ⏳
-- Sesión 5: Modelo de precio (regresión simple) ⏳
-- Sesión 6: Diagnóstico e inferencia del modelo ⏳
-- Sesión 7: Modelo múltiple (controlando por) ⏳
-- Sesión 8: Presentación ejecutiva + defensa oral ⏳
+| # | Sesión | Bloques temario | Status |
+|---|---|---|---|
+| 1 | Marco de pruebas de hipótesis (t una muestra) | 2.1 | ✅ |
+| 2 | Pruebas de dos muestras (t/z) | 2.2, 2.3 | ✅ |
+| 3 | ANOVA + χ² | 3.1–3.2, 4.1–4.3 | ⏳ |
+| 4 | Regresión simple I: del problema al modelo | 5.1, 5.7 (intro) | ⏳ |
+| 5 | Regresión simple II: validez, supuestos, diagnóstico | 5.2, 5.3, 5.4 | ⏳ |
+| 6 | Regresión simple III: interpretación, predicción, comunicación | 5.5, 5.6, causalidad | ⏳ |
+| 7 | Regresión múltiple I: construcción y "controlando por" | 6.1, 6.2, 6.3 | ⏳ |
+| 8 | Regresión múltiple II: diagnóstico, interpretación, caso integrador | 6.4, 6.5, 6.6 | ⏳ |
+
+**Evaluación (fuera del conteo de 8 sesiones)**: 2 sesiones extra reservadas para examen y defensa final del proyecto integrador.
+
+## Decisiones pedagógicas tomadas (no reabrir sin razón fuerte)
+
+1. **No hay sesión dedicada a "auditoría en vivo"**. La idea original (S4 como auditoría) se eliminó. Los 90 min ganados se reasignaron para que regresión simple ocupe 3 sesiones (S4, S5, S6) en lugar de 2. La razón: regresión simple es el cimiento de toda la segunda mitad del curso; si queda débil, la múltiple es desastre.
+
+2. **Tema transversal "IA en el análisis de datos" — pendiente al cierre del curso**. Originalmente las slides de S1 incluían una mini-sección "Auditoría IA-era". Se decidió **extraerla y convertirla en un tema independiente al cierre del curso**, que integre de forma unificada: auditoría de análisis generados por IA, detección de errores de supuestos, interpretación crítica, comunicación responsable, y el principio rector del curso. **No olvidar incluirlo después de S8.** Cuando se trabajen S2-S8, no repetir mini-secciones de IA dentro de cada sesión: dejarlo para el cierre.
+
+3. **Causalidad vs correlación es tema explícito**. Aparece sembrado en S2 (con superhost), retomado en S3 (con ANOVA y zonas), y central en S6 (regresión simple III). En S7 (múltiple I) cobra peso máximo con el concepto de "controlando por".
 
 El perfil completo de Patricia está en `datos/perfil_patricia.md`.
 
@@ -46,7 +58,7 @@ El perfil completo de Patricia está en `datos/perfil_patricia.md`.
 
 ## Convenciones de código
 
-- Todo el código en **R** (tidyverse), no base R salvo donde tenga sentido (ej. `t.test()`).
+- Todo el código en **R** (tidyverse), no base R salvo donde tenga sentido (ej. `t.test()`, `lm()`).
 - Comentarios en **español**, claros, profesionales.
 - Usar pipe nativo `|>` (no `%>%`).
 - Encoding UTF-8.
@@ -60,7 +72,7 @@ El perfil completo de Patricia está en `datos/perfil_patricia.md`.
 primary:   #2C3E50   (azul oscuro, texto y encabezados)
 accent:    #18BC9C   (verde azulado, datos principales / Patricia)
 info:      #3498DB   (azul, énfasis secundario)
-warning:   #F39C12   (naranja, advertencias / IA-era)
+warning:   #F39C12   (naranja, advertencias)
 danger:    #E74C3C   (rojo, afirmaciones bajo prueba)
 light:     #ECF0F1   (gris claro, fondos)
 ```
@@ -89,17 +101,17 @@ Estos valores están en `estilo-sitio.scss` y `estilo-slides.scss`.
 │       ├── 01_marco_pruebas_hipotesis.qmd       ✅
 │       ├── 02_pruebas_dos_muestras.qmd          ✅
 │       ├── 03_anova_chi2.qmd                    ⏳
-│       ├── 04_auditoria_pruebas.qmd             ⏳
-│       ├── 05_regresion_simple.qmd              ⏳
-│       ├── 06_diagnostico_inferencia.qmd        ⏳
-│       ├── 07_regresion_multiple.qmd            ⏳
-│       └── 08_caso_integrador.qmd               ⏳
+│       ├── 04_regresion_simple_1.qmd            ⏳ (del problema al modelo)
+│       ├── 05_regresion_simple_2.qmd            ⏳ (validez, supuestos, diagnóstico)
+│       ├── 06_regresion_simple_3.qmd            ⏳ (interpretación, predicción, causalidad)
+│       ├── 07_regresion_multiple_1.qmd          ⏳ (construcción, controlando por)
+│       └── 08_regresion_multiple_2.qmd          ⏳ (diagnóstico, interpretación, caso)
 ├── analisis/                          ← NO SE PUBLICA (excluido en _quarto.yml)
 │   ├── _metadata.yml                  ← fuerza draft: true
 │   ├── 01_patricia_articulo_1800.qmd  ✅  (notebook S1)
 │   └── 02_patricia_comparaciones.qmd  ✅  (notebook S2)
 ├── recursos/                          ⏳ (pendiente)
-├── auditorias/                        ⏳ (pendiente)
+├── auditorias/                        ⏳ (pendiente — material para tema IA al cierre)
 └── assets/
     └── img/                           ← logo, favicon
 ```
@@ -140,19 +152,17 @@ El notebook interno sirve para:
 - Eliminar placeholders en los textos interpretativos
 - Ser (eventualmente) compartido como modelo de respuesta
 
-**Regla de oro**: si una slide tiene un número específico (ej. "$2,450 promedio"), ese número debe estar justificado por la ejecución del notebook interno. Si hay un placeholder, dejarlo marcado claramente con `TODO: confirmar con notebook`.
+**Regla de oro**: si una slide tiene un número específico (ej. "$2,450 promedio"), ese número debe obtenerse directamente de los resultados del análisis o de la base de datos (deben ser dinámicos, para que se actualicen cuando cambie la base). NO usar placeholder.
 
 ## Mejoras pendientes detectadas
 
-1. **Sesión 1 tiene números placeholder** (ej. "897 propiedades", "$2,450"). Deben reemplazarse con código inline `` `r ... ` `` una vez que se haya corrido `scripts/00_descarga_datos.R` y `analisis/01_patricia_articulo_1800.qmd`.
+1. **Verificar el campo `alcaldia`** al primer `render`. Inside Airbnb puede poner "Roma Norte" como colonia O la alcaldía ("Cuauhtémoc"). El notebook interno tiene una sección de diagnóstico para esto.
 
-2. **Verificar el campo `alcaldia`** al primer `render`. Inside Airbnb puede poner "Roma Norte" como colonia O la alcaldía ("Cuauhtémoc"). El notebook interno tiene una sección de diagnóstico para esto.
+2. **Falta `styles.css`** referenciado en `_quarto.yml` (pero es opcional).
 
-3. **Falta `styles.css`** referenciado en `_quarto.yml` (pero es opcional).
+3. **Faltan páginas índice** de `recursos/` y `auditorias/`. Están declaradas en navbar pero no existen.
 
-4. **Faltan páginas índice** de `recursos/` y `auditorias/`. Están declaradas en navbar pero no existen.
-
-5. **Falta el logo** en `assets/img/logo.png`. Mientras no exista, comentar la línea `logo:` del YAML de los slides.
+4. **Falta el logo** en `assets/img/logo.png`. Mientras no exista, comentar la línea `logo:` del YAML de los slides.
 
 ## Comandos útiles
 

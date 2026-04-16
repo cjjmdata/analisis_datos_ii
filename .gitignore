@@ -1,0 +1,27 @@
+# Datos generados (se regeneran con scripts/00_descarga_datos.R)
+datos/*.rds
+datos/*.csv
+datos/*.csv.gz
+!datos/.gitkeep
+
+# Cachés de Quarto
+_site/
+_freeze/
+.quarto/
+*_files/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+EOF

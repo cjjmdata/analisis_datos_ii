@@ -40,16 +40,18 @@ Los alumnos actúan como **analistas junior de una consultora**. Esto implica:
 
 ## Mapa narrativo por sesión
 
+Las 8 sesiones son **contenido**. Las evaluaciones (examen y defensa del proyecto integrador) se imparten en sesiones extra que **no están dentro de este conteo**.
+
 | # | Pregunta que Patricia trae a la consultora | Qué le entregamos |
 |---|---|---|
-| 1 | "Un artículo dice que un Airbnb promedio en Roma Norte cuesta $1,800 la noche. ¿Es realista esa cifra?" | Validación con prueba de una muestra |
-| 2 | "¿Cobro más rentando el depto entero o solo un cuarto? ¿Debo buscar ser superhost? ¿El fin de semana vale la pena cobrar diferente?" | Comparaciones con pruebas de dos muestras |
-| 3 | "¿Mi alcaldía realmente vale la pena? Comparo Roma con Condesa, Polanco y Del Valle." | Comparación múltiple con ANOVA y asociación con χ² |
-| 4 | "Mi cuñado conoce a alguien que le pasó este análisis. ¿Le hacemos caso?" | Auditoría en vivo de un análisis defectuoso |
-| 5 | "¿Qué precio base me sugiere el mercado para 2 recámaras?" | Modelo lineal simple: precio ~ recámaras |
-| 6 | "¿Qué tan seguro estás de esa recomendación? Quiero un rango, no un número mágico." | Diagnósticos del modelo, intervalos de confianza vs. predicción |
-| 7 | "Un solo factor no basta. Combinemos todo lo que sabemos sobre el mercado." | Regresión múltiple con interpretación y controles |
-| 8 | Presentación ejecutiva + Q&A | Defensa oral del equipo consultor |
+| 1 | "Un artículo dice que un Airbnb promedio en Roma Norte cuesta $1,800 la noche. ¿Es realista esa cifra?" | Prueba t de una muestra |
+| 2 | "¿Cobro más rentando el depto entero o solo un cuarto? ¿Debo buscar ser superhost? ¿Las zonas vecinas son comparables?" | Pruebas de dos muestras (t y proporciones) |
+| 3 | "Quiero comparar Roma, Condesa, Polanco y Del Valle a la vez. Y saber si el tipo de propiedad se relaciona con la zona." | ANOVA unidireccional + χ² de contingencia |
+| 4 | "Los grupos ya los comparamos. Ahora quiero una forma de estimar el precio a partir de las características de una propiedad." | Regresión simple I: del problema al modelo (ajuste, interpretación básica) |
+| 5 | "¿Puedo confiar en ese modelo? ¿Los supuestos que asume son razonables para mi mercado?" | Regresión simple II: validez, supuestos, diagnóstico |
+| 6 | "Dame el número y su margen de error. Y explícame si esto se puede leer como causa o solo como asociación." | Regresión simple III: interpretación, predicción, causalidad vs. asociación |
+| 7 | "Un solo factor no alcanza. Quiero estimar el precio controlando por varias cosas a la vez." | Regresión múltiple I: construcción y "controlando por" |
+| 8 | "Entrega final: un modelo que pueda defender y una recomendación concreta sobre cómo listar." | Regresión múltiple II: diagnóstico, interpretación, caso integrador |
 
 ## Decisiones de diseño
 

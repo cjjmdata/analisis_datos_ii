@@ -27,12 +27,46 @@ execute:
 
 ```{r}
 library(dplyr)
+library(readr)
 library(ggplot2)
 library(scales)
 library(knitr)
 
-# Datos limpios preparados por scripts/00_descarga_datos.R
-listings <- readRDS("../datos/listings_cdmx.rds")
+# Pipeline alineado con el slide público 01_marco_pruebas_hipotesis.qmd:
+# leemos el csv crudo de Inside Airbnb con nombres originales y hacemos
+# SÓLO la limpieza mínima necesaria para que los alumnos puedan replicar
+# palabra por palabra lo que ven en las slides.
+listings <- read_csv("../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE)
+
+n_crudo <- nrow(listings)
+
+listings <- listings |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+n_limpio <- nrow(listings)
+
+# Fecha del snapshot: derivada de la columna `last_scraped` para que
+# subtítulos, captions y textos narrativos se actualicen solos cuando
+# cambie el corte de Inside Airbnb. Mes en español por tabla local
+# para no depender del locale del sistema.
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+cat("Listings en el crudo : ", format(n_crudo,  big.mark = ","), "\n",
+    "Listings tras limpiar: ", format(n_limpio, big.mark = ","),
+    " (drop ", format(n_crudo - n_limpio, big.mark = ","), ")\n",
+    "Fecha de corte       : ", fecha_corte_iso, "\n",
+    sep = "")
 
 # Paleta del curso (consistente con slides)
 colores <- list(
@@ -65,27 +99,40 @@ theme_curso <- function() {
 glimpse(listings)
 ```
 
-### 2.2 Distribución de niveles de `alcaldia`
+### 2.2 Cómo identificamos "Roma Norte"
 
-Verificamos cómo Inside Airbnb etiqueta el campo `neighbourhood_cleansed` para CDMX. Esto determina si "Roma Norte" aparece directamente o si hay que ajustar el filtro.
+Inside Airbnb provee dos campos geográficos para CDMX:
+
+- `neighbourhood_cleansed`: las 16 alcaldías oficiales. No baja a nivel colonia.
+- `host_neighbourhood`: texto libre que **el host declara**. Contiene "Roma Norte" explícitamente, pero tiene ~45% de valores faltantes.
+
+Usamos `host_neighbourhood` porque es la única vía para aislar Roma Norte. La decisión tiene un costo metodológico que hay que declarar en la narrativa: el subset está condicionado a hosts que reportaron su colonia, probablemente sesgados hacia operadores más profesionales.
 
 ```{r}
+# Cobertura del campo host_neighbourhood
 listings |>
-  count(alcaldia, sort = TRUE) |>
-  head(15) |>
-  kable(col.names = c("Alcaldía/Colonia", "Listings"))
-```
+  summarise(
+    total        = n(),
+    con_colonia  = sum(!is.na(host_neighbourhood)),
+    sin_colonia  = sum(is.na(host_neighbourhood)),
+    pct_faltante = round(100 * mean(is.na(host_neighbourhood)), 1)
+  ) |>
+  kable()
 
-::: {.callout-note}
-**Decisión operativa al revisar este output.** Si aparece "Roma Norte" → el filtro de las slides funciona. Si aparece solo "Cuauhtémoc" → hay que ajustar a nivel de alcaldía y la narrativa cambia a "en toda Cuauhtémoc" en lugar de "en Roma Norte". Documentar esta decisión antes de la clase.
-:::
+# Top colonias reportadas
+listings |>
+  filter(!is.na(host_neighbourhood)) |>
+  count(host_neighbourhood, sort = TRUE) |>
+  head(10) |>
+  kable(col.names = c("host_neighbourhood", "Listings"))
+```
 
 ## 3. Subset: Roma Norte, propiedad completa
 
 ```{r}
 roma_norte <- listings |>
-  filter(alcaldia == "Roma Norte",
-         tipo_habitacion == "Propiedad completa")
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt")
 
 # Tamaño del subset
 n_roma <- nrow(roma_norte)
@@ -98,13 +145,13 @@ cat("Listings en el subset:", n_roma, "\n")
 resumen <- roma_norte |>
   summarise(
     n           = n(),
-    media       = mean(precio),
-    mediana     = median(precio),
-    desv_est    = sd(precio),
-    p10         = quantile(precio, 0.10),
-    p90         = quantile(precio, 0.90),
-    precio_min  = min(precio),
-    precio_max  = max(precio)
+    media       = mean(price),
+    mediana     = median(price),
+    desv_est    = sd(price),
+    p10         = quantile(price, 0.10),
+    p90         = quantile(price, 0.90),
+    precio_min  = min(price),
+    precio_max  = max(price)
   )
 
 resumen |>
@@ -117,26 +164,26 @@ resumen |>
 ```{r}
 #| fig-width: 10
 #| fig-height: 5
-ggplot(roma_norte, aes(x = precio)) +
+ggplot(roma_norte, aes(x = price)) +
   geom_histogram(bins = 40, fill = colores$accent,
                  color = "white", alpha = 0.85) +
   geom_vline(xintercept = 1800, color = colores$danger,
              linewidth = 1, linetype = "dashed") +
-  geom_vline(xintercept = mean(roma_norte$precio),
+  geom_vline(xintercept = mean(roma_norte$price),
              color = colores$primary, linewidth = 1) +
   annotate("text", x = 1800, y = Inf, label = "Afirmación: $1,800",
            color = colores$danger, hjust = -0.1, vjust = 2, size = 4) +
-  annotate("text", x = mean(roma_norte$precio), y = Inf,
+  annotate("text", x = mean(roma_norte$price), y = Inf,
            label = paste0("Media observada: $",
-                          format(round(mean(roma_norte$precio)), big.mark = ",")),
+                          format(round(mean(roma_norte$price)), big.mark = ",")),
            color = colores$primary, hjust = 1.1, vjust = 4, size = 4) +
   scale_x_continuous(labels = label_comma(), limits = c(0, 8000)) +
   labs(
     title = "Precio por noche en Roma Norte · Propiedad completa",
-    subtitle = "Distribución de listings activos al cierre de septiembre 2025",
+    subtitle = paste0("Distribución de listings activos al corte de ", fecha_corte_txt),
     x = "Precio (MXN por noche)",
     y = "Número de listings",
-    caption = "Fuente: Inside Airbnb, corte 2025-09-27"
+    caption = paste0("Fuente: Inside Airbnb, corte ", fecha_corte_iso)
   ) +
   theme_curso()
 ```
@@ -151,8 +198,8 @@ cat("n =", n_roma, "— TCL aplica si n ≥ 30\n\n")
 
 # Skewness y asimetría visual
 cat("Asimetría de los datos originales:\n")
-cat("  Media      :", round(mean(roma_norte$precio), 0), "\n")
-cat("  Mediana    :", round(median(roma_norte$precio), 0), "\n")
+cat("  Media      :", round(mean(roma_norte$price), 0), "\n")
+cat("  Mediana    :", round(median(roma_norte$price), 0), "\n")
 cat("  (Si media > mediana, los datos están sesgados a la derecha,\n")
 cat("   típico de precios; no invalida la t-test por TCL.)\n")
 ```
@@ -169,7 +216,7 @@ Nivel de significancia: $\alpha = 0.05$.
 
 ```{r}
 prueba <- t.test(
-  x           = roma_norte$precio,
+  x           = roma_norte$price,
   mu          = 1800,
   alternative = "two.sided",
   conf.level  = 0.95
@@ -182,8 +229,8 @@ prueba
 
 ```{r}
 resultados <- list(
-  media_muestral   = round(mean(roma_norte$precio), 0),
-  mediana_muestral = round(median(roma_norte$precio), 0),
+  media_muestral   = round(mean(roma_norte$price), 0),
+  mediana_muestral = round(median(roma_norte$price), 0),
   estadistico_t    = round(prueba$statistic, 3),
   grados_libertad  = round(prueba$parameter, 0),
   p_valor          = format.pval(prueba$p.value, digits = 3),
@@ -229,32 +276,37 @@ if (prueba$p.value < 0.05) {
 **Para: Patricia Domínguez**
 **Asunto: Validación de la referencia de $1,800 MXN**
 
-Con base en `r resultados$n` propiedades completas listadas en Roma Norte (corte del 27 de septiembre de 2025), el precio promedio observado es de **$`r format(resultados$media_muestral, big.mark=",")` MXN por noche**, con intervalo de confianza al 95% entre **$`r format(resultados$ic_inf, big.mark=",")` y $`r format(resultados$ic_sup, big.mark=",")` MXN**. La cifra de $1,800 mencionada en el artículo está **fuera** de ese intervalo (p = `r resultados$p_valor`), por lo que recomendamos no usarla como referencia para su planeación financiera.
+Con base en `r resultados$n` propiedades completas listadas en Roma Norte (corte del `r fecha_corte_txt`), el precio promedio observado es de **$`r format(resultados$media_muestral, big.mark=",")` MXN por noche**, con intervalo de confianza al 95% entre **$`r format(resultados$ic_inf, big.mark=",")` y $`r format(resultados$ic_sup, big.mark=",")` MXN**. La cifra de $1,800 mencionada en el artículo está **fuera** de ese intervalo (p = `r resultados$p_valor`), por lo que recomendamos no usarla como referencia para su planeación financiera.
 
 La mediana observada es **$`r format(resultados$mediana_muestral, big.mark=",")` MXN**, y como el precio de Airbnb tiende a distribuirse de forma asimétrica (algunos listings muy caros elevan la media), puede ser una referencia más conservadora y robusta.
+
+**Alcance y limitaciones del dato**: identificamos "Roma Norte" usando la colonia que el propio host declara en su listing. Aproximadamente el 45% de los hosts en CDMX no reportan este campo, por lo que la muestra está implícitamente condicionada a hosts que sí lo hicieron — probablemente operadores más profesionales o con más experiencia. No tenemos evidencia directa de que eso sesgue el precio promedio en una dirección específica, pero conviene tenerlo en cuenta.
 
 **Lo que este análisis NO responde aún**: qué precio cobrar específicamente por su depto de 2 recámaras, cómo varía el precio por temporada, o cómo se compara Roma Norte con otras alcaldías. Esos análisis los trabajaremos en las siguientes sesiones.
 :::
 
-## 6. Números exactos para las slides
+## 6. Valores finales (referencia)
 
-Esta es la tabla de sustitución para eliminar placeholders de `01_marco_pruebas_hipotesis.qmd`:
+La slide pública `01_marco_pruebas_hipotesis.qmd` ya **no** depende de este notebook: corre el `t.test` en vivo dentro de su propio setup chunk, sobre los mismos filtros que aquí. Por eso los números del notebook y los de la slide deben coincidir exactamente. Si alguna vez no cuadran, es una señal de que los pipelines divergieron y hay que alinearlos.
 
 ```{r}
 #| echo: false
 tibble::tribble(
-  ~Placeholder_en_slides, ~Valor_real,
-  "897 propiedades",     paste(resultados$n, "propiedades"),
-  "$2,450 promedio",     paste0("$", format(resultados$media_muestral, big.mark=","), " promedio"),
-  "$2,380",              paste0("$", format(resultados$ic_inf, big.mark=",")),
-  "$2,520",              paste0("$", format(resultados$ic_sup, big.mark=",")),
-  "$2,200 mediana",      paste0("$", format(resultados$mediana_muestral, big.mark=","), " mediana")
+  ~Variable,             ~Valor,
+  "n",                   format(resultados$n, big.mark=","),
+  "Media muestral",      paste0("$", format(resultados$media_muestral, big.mark=",")),
+  "Mediana",             paste0("$", format(resultados$mediana_muestral, big.mark=",")),
+  "IC95% inferior",      paste0("$", format(resultados$ic_inf, big.mark=",")),
+  "IC95% superior",      paste0("$", format(resultados$ic_sup, big.mark=",")),
+  "Estadístico t",       as.character(resultados$estadistico_t),
+  "Grados de libertad",  as.character(resultados$grados_libertad),
+  "Valor-p",             resultados$p_valor
 ) |> kable()
 ```
 
 ## 7. Preservación de resultados
 
-Guardamos los resultados para que otras sesiones puedan referenciarlos si hace falta:
+Seguimos guardando el objeto `resultados` como artefacto histórico (por si alguna sesión posterior quiere leer los números de S1 sin re-ejecutar el pipeline), pero ya no es una dependencia del slide público.
 
 ```{r}
 saveRDS(resultados, "../datos/resultados_s01.rds")

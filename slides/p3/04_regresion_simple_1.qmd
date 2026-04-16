@@ -1,0 +1,429 @@
+---
+title: "Regresión simple I: del problema al modelo"
+subtitle: "Sesión 4 · Parcial 3 · Análisis de Datos II"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "[⌂ Inicio](../../index.html) · Análisis de Datos II — Sesión 4 · 5.1 Modelo lineal · 5.7 Aplicaciones con R"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+
+# Mismo pipeline que S1-S3: csv crudo, nombres originales, limpieza mínima.
+listings <- read_csv("../../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+# Fecha de corte (dinámica, desde la propia base)
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+# Tema de ggplot del curso
+theme_curso <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      axis.title = element_text(color = "#2C3E50"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+
+# ---- Subset: Roma Norte, propiedad completa, bedrooms disponible ----
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms))
+
+# ---- Resumen descriptivo por recámaras ----
+resumen_rec <- roma |>
+  group_by(bedrooms) |>
+  summarise(
+    n       = n(),
+    media   = round(mean(price), 0),
+    mediana = round(median(price), 0),
+    de      = round(sd(price), 0),
+    .groups = "drop"
+  )
+
+# ---- Modelo lineal simple ----
+modelo <- lm(price ~ bedrooms, data = roma)
+coefs   <- coef(modelo)
+b0      <- coefs[["(Intercept)"]]
+b1      <- coefs[["bedrooms"]]
+r2      <- summary(modelo)$r.squared
+
+# ---- Predicción para Patricia (2 recámaras) ----
+pred_patricia <- predict(modelo, newdata = data.frame(bedrooms = 2))
+
+# ---- Lista `resultados` para inline R ----
+resultados <- list(
+  fecha_corte_iso  = fecha_corte_iso,
+  fecha_corte_txt  = fecha_corte_txt,
+  n                = nrow(roma),
+  b0               = round(b0, 0),
+  b1               = round(b1, 0),
+  r2               = round(r2, 3),
+  pred_2rec        = round(as.numeric(pred_patricia), 0),
+  media_global     = round(mean(roma$price), 0),
+  mediana_global   = round(median(roma$price), 0),
+  media_2rec       = round(mean(roma$price[roma$bedrooms == 2]), 0),
+  n_2rec           = sum(roma$bedrooms == 2),
+  n_estudios       = sum(roma$bedrooms == 0),
+  pct_1_2          = round(100 * sum(roma$bedrooms %in% c(1, 2)) / nrow(roma), 0)
+)
+```
+
+# Recapitulación {background-color="#2C3E50"}
+
+## Lo que llevamos con [Patricia]{.patricia} {.smaller}
+
+**Sesión 1** — El artículo decía \$1,800. Lo validamos con una prueba **t de una muestra** y descubrimos que no era creíble.
+
+**Sesión 2** — Comparamos pares: completo vs. cuarto, superhost vs. no. Pruebas **t y de proporciones**.
+
+**Sesión 3** — Comparamos 4 zonas a la vez (**ANOVA**) y la composición del mercado (**χ²**).
+
+En las tres sesiones, la lógica fue *comparar*: ¿este grupo es distinto de aquel? ¿esta media es igual a esa? Hoy damos un salto.
+
+## Hoy: Patricia necesita un número concreto {.smaller}
+
+> *"Comparar zonas y tipos me sirvió, pero ahora necesito una respuesta más concreta: dado mi depto de 2 recámaras en Roma Norte, ¿qué precio debo cobrar por noche? Quiero un modelo que me dé un número, no solo comparaciones."*
+
+::: {.callout-note}
+El paso de "comparar grupos" a "modelar relaciones" es **el cambio de paradigma central del curso**. Las pruebas de hipótesis preguntan *¿hay diferencia?*. El modelo de regresión pregunta *¿cuánto?* y *¿qué espero para un caso nuevo?*
+:::
+
+# De comparar a modelar {background-color="#18BC9C"}
+
+## Lo que hicimos vs. lo que necesitamos {.smaller}
+
+| Sesiones 1-3 | Sesión 4 en adelante |
+|:---|:---|
+| ¿Es el promedio \$1,800? | ¿Cuánto debería cobrar Patricia? |
+| ¿Roma ≠ Condesa? | ¿En cuánto cambia el precio por cada recámara? |
+| Comparar **grupos** | Predecir un **valor** |
+| Respuesta: sí/no + p-valor | Respuesta: **un número** + su incertidumbre |
+
+El instrumento: **regresión lineal simple** — un modelo que relaciona una variable de respuesta (precio) con una variable predictora (recámaras).
+
+## La intuición visual {.smaller}
+
+Antes de fórmulas o código, veamos los datos.
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms))
+
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.3,
+              color = "#18BC9C") +
+  scale_y_continuous(labels = label_comma()) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(x = "Recámaras", y = "Precio (MXN/noche)",
+       title = "Precio vs. recámaras en Roma Norte")
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.25, color = "#18BC9C") +
+  scale_y_continuous(labels = label_comma()) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(x = "Recámaras", y = "Precio (MXN por noche)",
+       title = "Precio vs. recámaras en Roma Norte",
+       subtitle = paste0("Propiedad completa · n = ",
+                         resultados$n, " · corte ", fecha_corte_iso)) +
+  theme_curso()
+```
+
+:::
+
+A simple vista: más recámaras → precios más altos. ¿Podemos cuantificar esa tendencia?
+
+## ¿Qué es "la recta de mejor ajuste"? {.smaller}
+
+La idea de la regresión lineal simple es trazar **una recta** que resuma la tendencia general de la nube de puntos.
+
+$$\hat{y} = \beta_0 + \beta_1 \, x$$
+
+- $\hat{y}$ = precio **estimado** (no observado, sino predicho por el modelo)
+- $x$ = número de recámaras
+- $\beta_0$ = **intercepto** (valor estimado cuando $x = 0$)
+- $\beta_1$ = **pendiente** (cambio en $\hat{y}$ por cada unidad de aumento en $x$)
+
+::: {.callout-note appearance="minimal"}
+R encuentra los valores de $\beta_0$ y $\beta_1$ que **minimizan la suma de las distancias verticales al cuadrado** entre cada punto y la recta. Este método se llama *mínimos cuadrados ordinarios* (OLS). No necesitamos calcularlos a mano — `lm()` lo hace.
+:::
+
+# Construcción del modelo {background-color="#2C3E50"}
+
+## Los datos: precio por recámaras {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+roma |>
+  group_by(bedrooms) |>
+  summarise(
+    n       = n(),
+    media   = mean(price),
+    mediana = median(price),
+    de      = sd(price)
+  )
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+resumen_rec |>
+  knitr::kable(
+    col.names = c("Recámaras", "n", "Media", "Mediana", "DE"),
+    format.args = list(big.mark = ",")
+  )
+```
+
+:::
+
+La mayoría de los listings tienen 1 o 2 recámaras (`r resultados$pct_1_2`% del total). La media crece consistentemente con el número de recámaras.
+
+## Ajuste del modelo con `lm()` {.smaller}
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+modelo <- lm(price ~ bedrooms, data = roma)
+summary(modelo)
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+summary(modelo)
+```
+
+:::
+
+## Lectura del output de `summary()` {.smaller}
+
+El output tiene muchas líneas. Por ahora nos interesan **solo tres cosas**:
+
+1. **(Intercept)** — fila `Estimate`: es $\beta_0$
+2. **bedrooms** — fila `Estimate`: es $\beta_1$
+3. **Signif. codes** — los asteriscos dan una primera señal de si el efecto es estadísticamente significativo
+
+::: {.callout-warning appearance="minimal"}
+El R², los errores estándar, los p-valores de cada coeficiente y el F global **los veremos con calma en S5**. Hoy nos concentramos en la ecuación y su interpretación.
+:::
+
+# Lectura de coeficientes {background-color="#18BC9C"}
+
+## La ecuación estimada
+
+Con los datos de `r format(resultados$n, big.mark = ",")` propiedades completas en Roma Norte:
+
+$$\widehat{\text{precio}} = `r format(resultados$b0, big.mark = ",")` + `r format(resultados$b1, big.mark = ",")` \times \text{recámaras}$$
+
+Dos coeficientes, dos interpretaciones.
+
+## β₀: el intercepto {.smaller}
+
+$$\beta_0 = `r format(resultados$b0, big.mark = ",")` \text{ MXN}$$
+
+Es el precio estimado cuando `recámaras = 0`. En este caso, **un precio negativo no tiene sentido físico** — nadie paga $`r resultados$b0` por noche.
+
+¿Por qué sale ese número? Porque la recta de mejor ajuste **no está obligada a pasar por valores razonables fuera del rango de los datos**. El intercepto es un parámetro técnico que posiciona la recta, no una predicción real.
+
+::: {.callout-important}
+**Regla general sobre el intercepto.** A veces tiene interpretación sustantiva (si $x = 0$ es una situación real y hay datos en esa zona). A veces es solo un ajuste matemático. Siempre hay que preguntarse: *"¿tiene sentido práctico pensar en $x = 0$?"*. Aquí no: un depto con 0 recámaras, estrictamente, no existe como concepto en el dataset (los `r resultados$n_estudios` estudios tienen `bedrooms = 0` en el csv, pero son un caso límite).
+:::
+
+## β₁: la pendiente {.smaller}
+
+$$\beta_1 = `r format(resultados$b1, big.mark = ",")` \text{ MXN por recámara}$$
+
+Interpretación directa: **por cada recámara adicional**, el precio esperado por noche **aumenta en ~\$`r format(resultados$b1, big.mark = ",")`**.
+
+Esto es el corazón del modelo: una regla cuantitativa que convierte una característica de la propiedad en una estimación de precio.
+
+::: {.callout-warning}
+**Asociación, no causalidad.** Que el modelo diga "+\$`r format(resultados$b1, big.mark = ",")` por recámara" **no significa** que agregar una recámara a un depto cause un aumento de \$`r format(resultados$b1, big.mark = ",")`. Puede ser que los deptos con más recámaras sean más grandes, mejor ubicados, o de hosts más profesionales — y sean *esas* características las que expliquen el precio más alto.
+
+La distinción entre asociación y causalidad es tema central de la **Sesión 6**. Por ahora: todo lo que sale de este modelo es asociación.
+:::
+
+## Aplicación al depto de [Patricia]{.patricia} {.smaller}
+
+Patricia tiene un depto de **2 recámaras**. Sustituyendo:
+
+$$\widehat{\text{precio}} = `r format(resultados$b0, big.mark = ",")` + `r format(resultados$b1, big.mark = ",")` \times 2 = `r format(resultados$pred_2rec, big.mark = ",")` \text{ MXN/noche}$$
+
+::: {.panel-tabset style="font-size: 1.20em;"}
+
+## 💻 Código
+
+```{.r}
+predict(modelo, newdata = data.frame(bedrooms = 2))
+```
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+cat(paste0("       1\n", format(round(pred_patricia), big.mark = ",")))
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+Comparación con referencias previas: en S1 dijimos que la mediana del mercado era ~\$`r format(resultados$mediana_global, big.mark = ",")`. Ahora, condicionando en 2 recámaras, el modelo estima **\$`r format(resultados$pred_2rec, big.mark = ",")`** — un número más alto y más específico para su propiedad.
+:::
+
+# Visualización del modelo {background-color="#2C3E50"}
+
+## Recta ajustada sobre los datos {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.20em;"}
+```{.r}
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.3,
+              color = "#18BC9C") +
+  geom_smooth(method = "lm", se = FALSE,
+              color = "#2C3E50", linewidth = 1.2) +
+  scale_y_continuous(labels = label_comma()) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(x = "Recámaras", y = "Precio (MXN/noche)",
+       title = "Modelo: precio ~ recámaras")
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5.5
+ggplot(roma, aes(x = bedrooms, y = price)) +
+  geom_jitter(width = 0.15, alpha = 0.25, color = "#18BC9C") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE,
+              color = "#2C3E50", linewidth = 1.2) +
+  annotate("point", x = 2, y = as.numeric(pred_patricia),
+           color = "#E74C3C", size = 4) +
+  annotate("text", x = 2.3, y = as.numeric(pred_patricia),
+           label = paste0("Patricia: $",
+                          format(resultados$pred_2rec, big.mark = ",")),
+           color = "#E74C3C", hjust = 0, size = 5, fontface = "bold") +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 15000)) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(x = "Recámaras", y = "Precio (MXN por noche)",
+       title = "Modelo: precio ~ recámaras",
+       subtitle = paste0("Roma Norte · Propiedad completa · n = ",
+                         resultados$n, " · corte ", fecha_corte_iso)) +
+  theme_curso()
+```
+
+:::
+
+El punto rojo es la predicción para el depto de Patricia. La recta captura la tendencia general, pero hay **mucha dispersión** alrededor de ella — muchos puntos están lejos de la línea.
+
+## Lo que este modelo NO le dice a [Patricia]{.patricia} {.smaller}
+
+::: {.callout-important}
+El modelo nos dio un número (\$`r format(resultados$pred_2rec, big.mark = ",")`), pero **un número sin contexto de calidad es peligroso**:
+
+- **No sabemos qué tan preciso es.** ¿El margen de error es \$200 o \$2,000? Sin eso, la estimación no sirve para planear.
+- **No sabemos si el modelo es válido.** Asume una relación lineal y otras condiciones técnicas que no hemos verificado.
+- **Solo usa una variable.** El precio seguramente depende de más cosas (tamaño, amenidades, ubicación exacta, reseñas). Usar solo recámaras es una simplificación deliberada para aprender.
+- **No dice nada sobre causalidad.** La asociación recámaras → precio no implica que agregar recámaras aumente el precio.
+
+Cada una de estas limitaciones se resuelve en las próximas sesiones.
+:::
+
+# Actividad para notebook {background-color="#2C3E50"}
+
+## Lo que harán en su notebook {.smaller}
+
+Repliquen el análisis en su propio `.ipynb`:
+
+1. Filtrar Roma Norte, propiedad completa, `bedrooms` no faltante.
+2. Diagrama de dispersión de `price` vs `bedrooms`.
+3. Ajustar el modelo: `lm(price ~ bedrooms, data = roma)`.
+4. Extraer β₀ y β₁ e interpretar cada uno en una oración.
+5. Usar `predict()` para estimar el precio de un depto de 2 recámaras.
+6. Redactar un **párrafo profesional** (máximo 150 palabras) para Patricia que incluya: la estimación, qué significa, y al menos una advertencia honesta sobre las limitaciones.
+
+# Cierre {background-color="#18BC9C"}
+
+## Lo que llevan hoy {.smaller}
+
+1. El **cambio de paradigma**: de comparar grupos (pruebas de hipótesis) a **modelar relaciones** (regresión).
+2. La ecuación del modelo lineal simple: $\hat{y} = \beta_0 + \beta_1 x$.
+3. Cómo ajustar un modelo en R con `lm()` y leer el output básico.
+4. Interpretación de los coeficientes: qué significan β₀ y β₁ **en contexto de negocio**.
+5. Cómo obtener una predicción con `predict()`.
+6. Que un modelo que da un número **no es automáticamente un buen modelo** — hay que verificarlo.
+
+## Para la próxima sesión {.smaller}
+
+Tenemos un modelo y una predicción: **\$`r format(resultados$pred_2rec, big.mark = ",")` MXN/noche** para el depto de Patricia. Pero:
+
+- ¿Es **confiable** ese número?
+- ¿Los **supuestos** del modelo se cumplen?
+- ¿Qué tan bien **explica** los datos?
+- ¿Cómo sabemos si el modelo está **mal**?
+
+**Sesión 5: Regresión simple II — validez, supuestos, diagnóstico.**

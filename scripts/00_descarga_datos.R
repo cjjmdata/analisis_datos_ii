@@ -37,7 +37,9 @@ if (!file.exists(archivo_crudo)) {
 # Lectura ----------------------------------------------------------------------
 # El CSV trae ~75 columnas; leemos solo las que usaremos en el curso.
 columnas_interes <- c(
-  "id", "name", "neighbourhood_cleansed",
+  "id", "name",
+  "neighbourhood_cleansed",   # alcaldía (los 16 niveles oficiales)
+  "host_neighbourhood",       # colonia reportada por el host (texto libre, ~45% NA)
   "latitude", "longitude",
   "property_type", "room_type",
   "accommodates", "bedrooms", "beds", "bathrooms_text",
@@ -91,6 +93,7 @@ listings <- listings_raw |>
   ) |>
   rename(
     alcaldia       = neighbourhood_cleansed,
+    colonia        = host_neighbourhood,
     tipo_propiedad = property_type,
     capacidad      = accommodates,
     recamaras      = bedrooms,
@@ -107,7 +110,7 @@ listings <- listings_raw |>
     resenas_por_mes = reviews_per_month
   ) |>
   select(
-    id, name, alcaldia, latitude, longitude,
+    id, name, alcaldia, colonia, latitude, longitude,
     tipo_propiedad, tipo_habitacion,
     capacidad, recamaras, camas, banios,
     precio,

@@ -2,7 +2,35 @@
 title: "Análisis de Datos II"
 subtitle: "Estadística inferencial y modelado para la toma de decisiones"
 lang: es
+execute:
+  echo: false
+  warning: false
+  message: false
 ---
+
+```{r}
+#| include: false
+# Fecha de corte del dataset: se deriva de la columna `last_scraped`
+# para que el texto de la landing quede sincronizado con el snapshot
+# cargado en datos/. Leemos solo esa columna para no cargar el csv
+# completo en la página principal.
+fecha_corte_date <- suppressWarnings(max(
+  readr::read_csv(
+    "datos/listings_cdmx_raw.csv.gz",
+    col_types = readr::cols_only(last_scraped = readr::col_date())
+  )$last_scraped,
+  na.rm = TRUE
+))
+
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_txt <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+```
 
 Este sitio reúne las **presentaciones, casos y recursos** del curso Análisis de Datos II (MAT2409). El enfoque combina los temas del programa oficial con una postura clara: en la era de la IA, el valor del analista no está en ejecutar cálculos, sino en **formular buenas preguntas, verificar resultados y comunicar decisiones bajo incertidumbre**.
 
@@ -31,7 +59,7 @@ Cada sesión agrega una capa al análisis:
 7. Modelo con múltiples factores
 8. Presentación ejecutiva y defensa
 
-Los datos provienen de [Inside Airbnb](https://insideairbnb.com/), corte del 27 de septiembre de 2025, bajo licencia Creative Commons.
+Los datos provienen de [Inside Airbnb](https://insideairbnb.com/), corte del `r fecha_corte_txt`, bajo licencia Creative Commons.
 
 ## Aviso importante sobre este sitio
 
