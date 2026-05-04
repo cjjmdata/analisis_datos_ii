@@ -8,6 +8,7 @@ project:
     - "auditorias/**/*.qmd"
     - "!analisis/"     # notebooks internos de validación — no se publican
     - "!scripts/"      # scripts R — no se publican
+    - "!prompts/"      # memos de diseño de sesiones — no se publican
 
 website:
   title: "Análisis de Datos II"

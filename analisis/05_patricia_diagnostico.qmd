@@ -1,0 +1,527 @@
+---
+title: "Análisis completo · Sesión 5"
+subtitle: "Regresión simple II: validez, supuestos y diagnóstico del modelo precio ~ recámaras"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> **Propósito.** Es el análisis completo que subyace a la presentación de la Sesión 5. Reproduce el modelo de S4 con el mismo pipeline, lo audita visual y formalmente, y produce los números exactos que alimentan las slides.
+>
+> **Continuidad con S4 — y una corrección.** Desde S1 hemos arrastrado un listing extremo ($81,000 MXN/noche, 1 recámara) que distorsiona los diagnósticos. En S5 lo identificamos formalmente y depuramos el dataset. El modelo auditado en esta sesión, por tanto, **difiere ligeramente** del que se construyó en S4: mismos coeficientes (el atípico tenía bajo leverage), pero menor RSE y mayor R². La decisión de no rerenderizar S1-S4 es deliberada — se hará en el postmortem del semestre.
+>
+> **No se publica.** Vive en `analisis/`, excluida del render.
+
+## 1. Setup
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Pipeline idéntico al de S4: csv crudo, nombres originales, limpieza mínima.
+listings <- read_csv("../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+# Fecha del snapshot
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+# Paleta del curso
+colores <- list(
+  primary = "#2C3E50",
+  accent  = "#18BC9C",
+  info    = "#3498DB",
+  warn    = "#F39C12",
+  danger  = "#E74C3C",
+  light   = "#ECF0F1"
+)
+
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", color = colores$primary),
+      plot.subtitle = element_text(color = "#7F8C8D"),
+      axis.title = element_text(color = colores$primary),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = colores$light)
+    )
+}
+```
+
+## 2. Auditoría de los datos antes de auditar el modelo
+
+S5 incorpora una capa que S4 no tuvo: **antes de auditar el modelo, auditemos los datos**. Desde S1 hemos arrastrado un punto extremo en los gráficos. Aquí lo enfrentamos formalmente.
+
+### 2.1 Subset inicial (idéntico a S4)
+
+```{r}
+roma_full <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms))
+
+cat("Listings en el subset original:", nrow(roma_full), "\n")
+```
+
+### 2.2 Distribución superior y ranking de los más caros
+
+```{r}
+quantile(roma_full$price,
+         probs = c(0.90, 0.95, 0.99, 0.995, 0.999, 1.0)) |>
+  round() |>
+  tibble::enframe(name = "Percentil", value = "Precio (MXN/noche)") |>
+  knitr::kable(format.args = list(big.mark = ","))
+
+roma_full |>
+  arrange(desc(price)) |>
+  select(id, price, bedrooms, accommodates, property_type) |>
+  head(5) |>
+  knitr::kable(format.args = list(big.mark = ","))
+```
+
+**Observación clave.** El precio máximo ($`r format(max(roma_full$price), big.mark = ",")`) es **`r round(max(roma_full$price) / sort(roma_full$price, decreasing = TRUE)[2], 1)`× el segundo más alto**, en una propiedad de **`r roma_full$bedrooms[which.max(roma_full$price)]` recámara para `r roma_full$accommodates[which.max(roma_full$price)]` personas**. Las siguientes propiedades caras son grupales (7+ recámaras, 14+ personas) — sus precios son consistentes con su tamaño. **El atípico no parece lujo real; es casi seguro un error de captura del host.**
+
+### 2.3 El criterio que usamos: dominio, no estadística mecánica
+
+El listing problemático está en `bedrooms = 1`, la categoría más común del subset — no es una zona inusual del eje X. Su impacto sobre los **coeficientes** del modelo (β₀, β₁) es modesto, pero distorsiona enormemente la suma de cuadrados residuales: un residuo de ~$80k al cuadrado domina la SS_res, inflando RSE y deflactando R². **Indicadores estadísticos automáticos pueden no marcarlo** — pero un humano que conoce el mercado de Airbnb en CDMX sabe que $81k/noche para 1 recámara/2 personas no es lujo real, es un error de captura. **El criterio correcto aquí es de dominio**, no estadístico.
+
+### 2.4 Regla de filtrado: cap en P99.9
+
+```{r}
+p99_9 <- quantile(roma_full$price, 0.999, na.rm = TRUE)
+
+roma <- roma_full |>
+  filter(price <= p99_9)
+
+n_drop <- nrow(roma_full) - nrow(roma)
+
+cat(sprintf("Threshold P99.9 = $%s MXN/noche\n",
+            format(round(p99_9), big.mark = ",")))
+cat(sprintf("Listings descartados: %d (de %d)\n", n_drop, nrow(roma_full)))
+cat(sprintf("Listings finales:     %d\n", nrow(roma)))
+```
+
+Regla justificable y reproducible: *"para Airbnb residencial en Roma Norte, precios > P99.9 son implausibles para el mercado real."* Cae sólo el listing problemático; las propiedades grupales legítimas de 7+ recámaras quedan intactas.
+
+### 2.5 Refit y comparación con el modelo de S4
+
+```{r}
+modelo      <- lm(price ~ bedrooms, data = roma)        # depurado (S5)
+modelo_orig <- lm(price ~ bedrooms, data = roma_full)   # original (S4)
+
+res_modelo <- summary(modelo)
+res_orig   <- summary(modelo_orig)
+
+# Coeficientes que usa el resto del notebook
+coefs <- coef(modelo)
+b0 <- coefs[["(Intercept)"]]
+b1 <- coefs[["bedrooms"]]
+
+# Tabla comparativa
+comparacion <- tibble::tibble(
+  Métrica = c("n",
+              "β₀ intercepto (MXN)",
+              "β₁ pendiente (MXN/recámara)",
+              "R²", "R² ajustada",
+              "RSE (MXN)",
+              "p-valor pendiente"),
+  `Con atípico` = c(
+    format(nrow(roma_full), big.mark = ","),
+    format(round(coef(modelo_orig)["(Intercept)"]), big.mark = ","),
+    format(round(coef(modelo_orig)["bedrooms"]),    big.mark = ","),
+    sprintf("%.3f", res_orig$r.squared),
+    sprintf("%.3f", res_orig$adj.r.squared),
+    format(round(res_orig$sigma), big.mark = ","),
+    format.pval(res_orig$coefficients["bedrooms", "Pr(>|t|)"],
+                digits = 3, eps = 1e-16)
+  ),
+  `Sin atípico` = c(
+    format(nrow(roma), big.mark = ","),
+    format(round(coef(modelo)["(Intercept)"]), big.mark = ","),
+    format(round(coef(modelo)["bedrooms"]),    big.mark = ","),
+    sprintf("%.3f", res_modelo$r.squared),
+    sprintf("%.3f", res_modelo$adj.r.squared),
+    format(round(res_modelo$sigma), big.mark = ","),
+    format.pval(res_modelo$coefficients["bedrooms", "Pr(>|t|)"],
+                digits = 3, eps = 1e-16)
+  )
+)
+
+comparacion |> knitr::kable(align = "lrr")
+```
+
+**Lectura de la comparación.**
+
+- **Coeficientes apenas cambian.** β₀ y β₁ son casi idénticos al modelo de S4 — el atípico estaba en `bedrooms = 1`, low leverage, así que no movía la pendiente. La conclusión sustantiva que le dimos a Patricia ("cada recámara adicional se asocia con ~$X más") **sigue siendo válida**.
+- **RSE baja sustancialmente y R² mejora.** El residuo gigante del atípico inflaba la SS_res. Removerlo reordena el panorama de bondad de ajuste.
+- **Implicación.** La dirección del efecto era robusta desde S4. Lo que cambia es la **confianza en la predicción puntual**: ahora el RSE refleja el ruido real del mercado, no un error de captura.
+
+**De aquí en adelante**, todo el diagnóstico se hace sobre el modelo depurado (`modelo`).
+
+## 3. Diagnóstico visual
+
+`plot.lm()` produce cuatro gráficos clave. Los analizamos de uno por uno.
+
+### Advertencia preliminar: `bedrooms` es una variable discreta
+
+`bedrooms` toma sólo valores enteros (0, 1, 2, …). Esto **distorsiona la apariencia** de tres de los cuatro plots:
+
+- En residuales-vs-ajustados, los puntos forman **bandas verticales** (hay sólo unos pocos valores ajustados distintos).
+- En leverage, todos los puntos con el mismo `bedrooms` tienen leverage idéntico → **columnas verticales** de puntos.
+- En scale-location, lo mismo.
+
+La curva LOWESS roja por defecto pierde mucho de su utilidad. **Lo que sí funciona normal**: el Q-Q plot (no depende del eje X), y la lectura de la **altura/dispersión de cada banda** (sí informa sobre homocedasticidad).
+
+### 3.1 Vista panorámica (los 4 plots juntos)
+
+```{r}
+#| fig-width: 9
+#| fig-height: 8
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+plot(modelo)
+par(mfrow = c(1, 1))
+```
+
+### 3.2 Plot 1 — Residuals vs Fitted (linealidad y homocedasticidad)
+
+Diagnóstico de **linealidad** (¿la relación se aleja de una recta?) y, accesoriamente, **homocedasticidad** (¿la dispersión es constante?).
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+plot(modelo, which = 1)
+```
+
+**Qué buscamos:** que la línea roja LOWESS sea aproximadamente plana sobre cero (linealidad) y que las bandas tengan altura similar (homocedasticidad).
+
+**Qué encontramos en Patricia:** las bandas verticales reflejan la naturaleza discreta de `bedrooms`. La banda en `bedrooms = 1` y `bedrooms = 2` es estrecha; la de 3+ recámaras es claramente más alta. **Hay heterocedasticidad: la varianza crece con el número de recámaras.**
+
+### 3.3 Plot 2 — Q-Q de residuales (normalidad)
+
+Diagnóstico de **normalidad** de los residuales.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+plot(modelo, which = 2)
+```
+
+**Qué buscamos:** los puntos siguen la diagonal (residuales normales).
+
+**Qué encontramos:** la cola izquierda se ajusta razonablemente, pero la **cola derecha se despega fuerte** — los listings caros (Roma Norte tiene casas de lujo) producen residuales mucho mayores que los esperados bajo normalidad. Cola derecha pesada, esperable en datos de Airbnb.
+
+### 3.4 Plot 3 — Scale-Location (homocedasticidad refinada)
+
+Versión refinada del plot 1 para detectar **heterocedasticidad**: usa la raíz del valor absoluto de los residuales estandarizados.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+plot(modelo, which = 3)
+```
+
+**Qué buscamos:** línea roja plana → varianza constante.
+
+**Qué encontramos:** línea roja con **pendiente positiva clara** — confirma la heterocedasticidad detectada en el plot 1. La varianza de los residuales crece sistemáticamente con el valor ajustado.
+
+### 3.5 Plot 5 — Residuals vs Leverage (puntos influyentes)
+
+Diagnóstico de **observaciones influyentes**: puntos que mueven el modelo de forma desproporcionada.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+plot(modelo, which = 5)
+```
+
+**Qué buscamos:** que ningún punto se aleje mucho **a la vez** en residuo (vertical) y leverage (horizontal). Las curvas punteadas del plot son referencias de "puntos influyentes": si un punto cayera fuera, estaría moviendo el modelo de forma desproporcionada.
+
+**Qué encontramos:** los listings con muchas recámaras tienen leverage alto por construcción (son raros). Algunos con residuos grandes en esa zona, pero **ninguno cae fuera de las referencias** — el modelo no está siendo movido por un punto único.
+
+### 3.6 Cuantificación auxiliar de outliers e influencia
+
+Métricas auxiliares para tener cifras de respaldo del veredicto visual.
+
+```{r}
+res_std <- rstandard(modelo)
+cooks   <- cooks.distance(modelo)
+lev     <- hatvalues(modelo)
+
+n_outliers_std <- sum(abs(res_std) > 3, na.rm = TRUE)
+cook_max       <- max(cooks, na.rm = TRUE)
+cook_max_idx   <- which.max(cooks)
+
+cat(sprintf("Residuos relativamente grandes (|z| > 3): %d (%.1f%% de la muestra)\n",
+            n_outliers_std,
+            100 * n_outliers_std / nrow(roma)))
+cat(sprintf("Indicador de influencia máximo: %.4f", cook_max))
+cat(sprintf(" (en la observación %d, bedrooms = %d, price = %s MXN)\n",
+            cook_max_idx,
+            roma$bedrooms[cook_max_idx],
+            format(roma$price[cook_max_idx], big.mark = ",")))
+```
+
+### 3.7 Diagnóstico complementario: residuales por nivel de recámaras
+
+Como el LOWESS pierde poder con X discreta, miramos directamente la dispersión por nivel.
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+roma_aug <- roma |>
+  mutate(residuo = residuals(modelo),
+         ajustado = fitted(modelo))
+
+ggplot(roma_aug, aes(x = factor(bedrooms), y = residuo)) +
+  geom_hline(yintercept = 0, color = colores$primary,
+             linetype = "dashed") +
+  geom_boxplot(outlier.alpha = 0.3, fill = colores$accent,
+               color = colores$primary, alpha = 0.6) +
+  scale_y_continuous(labels = label_comma()) +
+  labs(
+    title = "Residuales por número de recámaras",
+    subtitle = paste0("La altura de cada caja crece → heterocedasticidad. ",
+                      "n = ", nrow(roma)),
+    x = "Recámaras", y = "Residuo (MXN)"
+  ) +
+  theme_curso()
+```
+
+La dispersión de los residuales **crece con el número de recámaras**: confirma la heterocedasticidad de forma directa, sin las distorsiones del LOWESS.
+
+## 4. Inferencia sobre la pendiente
+
+### 4.1 Lectura del summary
+
+```{r}
+coef_table <- res_modelo$coefficients
+coef_table |> kable(digits = 4)
+```
+
+```{r}
+t_b1     <- coef_table["bedrooms", "t value"]
+p_b1     <- coef_table["bedrooms", "Pr(>|t|)"]
+se_b1    <- coef_table["bedrooms", "Std. Error"]
+
+ic95_b1  <- confint(modelo, "bedrooms", level = 0.95)
+ic95_low <- ic95_b1[1, 1]
+ic95_high <- ic95_b1[1, 2]
+
+cat(sprintf("β₁ (pendiente)  = $%s MXN/recámara\n",
+            format(round(b1), big.mark = ",")))
+cat(sprintf("Error estándar  = $%s\n",
+            format(round(se_b1), big.mark = ",")))
+cat(sprintf("Estadístico t   = %.2f\n", t_b1))
+cat(sprintf("p-valor         = %s\n",
+            format.pval(p_b1, digits = 3, eps = 1e-16)))
+cat(sprintf("IC 95%% para β₁ = [$%s , $%s]\n",
+            format(round(ic95_low),  big.mark = ","),
+            format(round(ic95_high), big.mark = ",")))
+```
+
+### 4.2 Reframe en lenguaje S1-S2
+
+La prueba que hace `lm()` para la pendiente es **idéntica en estructura** a las pruebas de medias de S1-S2:
+
+| Concepto | S1 (t una muestra) | S5 (pendiente) |
+|---|---|---|
+| H₀ | μ = μ₀ | β₁ = 0 |
+| H₁ | μ ≠ μ₀ | β₁ ≠ 0 |
+| Estadístico | t = (x̄ − μ₀)/SE | t = β̂₁/SE(β̂₁) |
+| Decisión | rechazar si p < α | rechazar si p < α |
+
+El p-valor reportado responde: si en realidad las recámaras no afectaran el precio (β₁ = 0), ¿qué tan probable es ver una pendiente al menos tan grande como `r round(b1)`? La respuesta de R: `r format.pval(p_b1, digits = 3, eps = 1e-16)`. **Rechazamos H₀ con holgura.** El número de recámaras sí está asociado con el precio.
+
+## 5. Bondad de ajuste
+
+```{r}
+r2     <- res_modelo$r.squared
+r2_aj  <- res_modelo$adj.r.squared
+rse    <- res_modelo$sigma
+df_res <- res_modelo$df[2]
+
+f_stat <- res_modelo$fstatistic
+f_global <- f_stat[["value"]]
+f_df1    <- f_stat[["numdf"]]
+f_df2    <- f_stat[["dendf"]]
+p_f      <- pf(f_global, f_df1, f_df2, lower.tail = FALSE)
+
+media_precio  <- mean(roma$price)
+rse_pct_media <- 100 * rse / media_precio
+
+cat(sprintf("R²                 = %.3f  (%.1f%% de variabilidad explicada)\n",
+            r2, 100 * r2))
+cat(sprintf("R² ajustada        = %.3f\n", r2_aj))
+cat(sprintf("RSE                = $%s MXN/noche\n",
+            format(round(rse), big.mark = ",")))
+cat(sprintf("RSE como %% de la media = %.1f%% (media = $%s)\n",
+            rse_pct_media,
+            format(round(media_precio), big.mark = ",")))
+cat(sprintf("F global          = %.2f en (%d, %d) df, p = %s\n",
+            f_global, f_df1, f_df2,
+            format.pval(p_f, digits = 3, eps = 1e-16)))
+```
+
+### 5.1 Interpretación honesta
+
+**R² ≈ `r round(r2, 3)` (≈ `r round(100*r2)`%).** El número de recámaras explica esa fracción de la variabilidad en precio. El resto (`r round(100*(1-r2))`%) lo explican otras variables que el modelo no incluye (tamaño en m², amenidades, ubicación específica, calidad del host, reseñas).
+
+**RSE ≈ $`r format(round(rse), big.mark=",")` MXN.** Es el error típico de predicción del modelo. Comparado con la media del mercado ($`r format(round(media_precio), big.mark=",")`), representa **~`r round(rse_pct_media)`% de ruido relativo**.
+
+**¿R² bajo significa que el modelo es inútil?** No necesariamente. Significa que:
+
+- El modelo da **dirección** (más recámaras → más precio) con alta certeza estadística.
+- El modelo **no da precisión** suficiente para una predicción puntual confiable.
+- Es **insuficiente** para tomar la decisión final sin información adicional.
+
+Esto es exactamente el puente a la regresión múltiple (S7).
+
+## 6. Tabla integrada de diagnóstico
+
+```{r}
+diag_tabla <- tibble::tibble(
+  Supuesto         = c("Linealidad", "Homocedasticidad",
+                       "Independencia", "Normalidad de residuales"),
+  Diagnóstico      = c("Residuals vs Fitted",
+                       "Scale-Location + boxplot por nivel",
+                       "Diseño del muestreo",
+                       "Q-Q plot"),
+  Resultado        = c("Razonable, distorsionado por X discreta",
+                       "Violación clara: varianza crece con # recámaras",
+                       "Asumida (cada listing es un anuncio independiente)",
+                       "Cola derecha pesada (luxury listings)"),
+  Severidad        = c("Baja", "Media-alta", "Baja", "Media")
+)
+
+diag_tabla |> kable()
+```
+
+## 7. Veredicto y recomendación para Patricia
+
+```{r}
+# Predicción depurada para 2 recámaras (modelo S5)
+pred_2rec_s5 <- as.numeric(predict(modelo, newdata = data.frame(bedrooms = 2)))
+
+# La predicción que recibió Patricia en S4 (con atípico)
+res_s04 <- readRDS("../datos/resultados_s04.rds")
+
+veredicto <- paste0(
+  "El modelo depurado es estadísticamente significativo (β₁ con p < 0.001) ",
+  "pero limitado en poder explicativo (R² ≈ ",
+  format(round(r2, 2), nsmall = 2),
+  "). Las violaciones de supuestos (heterocedasticidad y cola derecha) ",
+  "no invalidan la dirección del efecto, pero sí debilitan la precisión ",
+  "de cualquier predicción puntual. Apto para orientación, no para ",
+  "compromiso financiero sin variables adicionales."
+)
+
+cat(veredicto)
+```
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Auditoría del modelo de precio que le entregamos en la sesión anterior**
+
+En la sesión pasada le dimos una predicción de **$`r format(round(res_s04$pred_2rec), big.mark = ",")` MXN/noche** para su departamento de 2 recámaras. Antes de que base decisiones financieras en ese número, hicimos dos cosas: **auditamos los datos y auditamos el modelo**. Estos son los hallazgos:
+
+**Auditoría de datos.** Identificamos un listing en el dataset con un precio implausible ($`r format(round(max(roma_full$price)), big.mark = ",")` por noche en una propiedad de 1 recámara para 2 personas) — casi seguro un error de captura del host. Lo descartamos del análisis usando un cap por percentil 99.9. **Esto refinó la predicción a $`r format(round(pred_2rec_s5), big.mark = ",")` MXN/noche**, sin cambiar la dirección ni magnitud del efecto que reportamos en S4.
+
+**Lo bueno del modelo.**
+
+- La relación entre recámaras y precio es **estadísticamente robusta** (p < 0.001). No es producto del azar.
+- Por cada recámara adicional, el precio sube en promedio **$`r format(round(b1), big.mark = ",")` MXN/noche**, con un margen de confianza de **[$`r format(round(ic95_low), big.mark = ",")` , $`r format(round(ic95_high), big.mark = ",")`]**.
+
+**Lo preocupante.**
+
+- El modelo solo explica **~`r round(100*r2)`%** de la variabilidad real en los precios. El resto depende de variables que aún no incluimos.
+- El error típico de predicción es de **~$`r format(round(rse), big.mark = ",")` MXN/noche**, que es **`r round(rse_pct_media)`% del precio promedio del mercado**.
+- Las propiedades grandes y caras tienen más variación que las pequeñas — el modelo es menos confiable conforme uno se aleja de la mayoría del mercado.
+
+**Conclusión.** La estimación depurada de **$`r format(round(pred_2rec_s5), big.mark = ",")`** es **un rango orientativo**, no un precio para fijar. Necesitamos un modelo con más variables (tamaño, amenidades, ubicación específica, calidad del host) antes de comprometer su decisión financiera.
+
+**La próxima sesión** convertirá esta predicción puntual en un **rango de incertidumbre formal** (intervalos de confianza y de predicción), y discutirá qué se puede afirmar — y qué no — sobre causalidad.
+:::
+
+## 8. Persistencia de resultados
+
+```{r}
+resultados_s05 <- list(
+  # Bondad de ajuste (modelo depurado)
+  r_cuadrada       = round(r2, 3),
+  r_cuadrada_aj    = round(r2_aj, 3),
+  rse              = round(rse, 0),
+  rse_pct_media    = round(rse_pct_media, 1),
+  media_precio     = round(media_precio, 0),
+  # Inferencia sobre la pendiente
+  t_pendiente      = round(t_b1, 2),
+  p_pendiente      = p_b1,
+  se_pendiente     = round(se_b1, 0),
+  ic95_b1_low      = round(ic95_low, 0),
+  ic95_b1_high     = round(ic95_high, 0),
+  # F global
+  f_global         = round(f_global, 2),
+  p_f_global       = p_f,
+  df_residual      = df_res,
+  # Diagnóstico
+  n_outliers_std   = n_outliers_std,
+  cook_max         = round(cook_max, 4),
+  cook_max_bedrooms = roma$bedrooms[cook_max_idx],
+  cook_max_price   = roma$price[cook_max_idx],
+  # Coeficientes y predicción depurados (modelo S5)
+  intercepto       = round(b0, 0),
+  pendiente        = round(b1, 0),
+  pred_2rec        = round(pred_2rec_s5, 0),
+  n                = nrow(roma),
+  # Auditoría de datos
+  threshold_p99_9  = round(p99_9, 0),
+  n_dropped        = n_drop,
+  precio_atipico   = round(max(roma_full$price), 0),
+  bedrooms_atipico = roma_full$bedrooms[which.max(roma_full$price)],
+  # Comparación con modelo S4 (con atípico) — útil para slide
+  intercepto_orig  = round(coef(modelo_orig)[["(Intercept)"]], 0),
+  pendiente_orig   = round(coef(modelo_orig)[["bedrooms"]], 0),
+  r2_orig          = round(res_orig$r.squared, 3),
+  rse_orig         = round(res_orig$sigma, 0),
+  pred_2rec_orig   = round(res_s04$pred_2rec, 0),
+  # Veredicto cualitativo
+  veredicto        = veredicto,
+  # Contexto temporal
+  fecha_corte_iso  = fecha_corte_iso,
+  fecha_corte_txt  = fecha_corte_txt
+)
+
+saveRDS(resultados_s05, "../datos/resultados_s05.rds")
+
+# Persistimos el objeto lm depurado para que S6 pueda hacer predict()
+# con intervalos sin recalcular. Distinto del modelo de S4 (con atípico).
+saveRDS(modelo, "../datos/modelo_s05.rds")
+
+message("Resultados guardados en datos/resultados_s05.rds")
+message("Modelo depurado guardado en datos/modelo_s05.rds")
+```

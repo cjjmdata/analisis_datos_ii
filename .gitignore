@@ -18,6 +18,9 @@ _freeze/site_libs/
 .RData
 .Ruserdata
 
+# Prompts internos / memos de diseño de sesiones — no se publican
+prompts/
+
 # Sistema
 .DS_Store
 Thumbs.db
@@ -29,3 +32,5 @@ Thumbs.db
 EOF
 
 /.quarto/
+
+**/*.quarto_ipynb
