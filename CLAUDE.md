@@ -66,6 +66,29 @@ El perfil completo de Patricia está en `datos/perfil_patricia.md`.
 - No usar bullets unicode; usar el pipe de Quarto para listas.
 - Factores siempre con niveles explícitos para estabilidad.
 
+## Continuidad de nombres entre sesiones
+
+Los alumnos construyen un script propio que evoluciona sesión a sesión. Cambiar el nombre de un objeto canónico entre sesiones rompe sus scripts.
+
+**Nombres estables a lo largo de todo el curso** (su contenido evoluciona, su nombre NO):
+
+| Nombre | Significado | Estabilidad |
+|---|---|---|
+| `listings` | Tabla cruda parseada de Inside Airbnb | Estable |
+| `roma` | Subset de trabajo (Roma Norte + Entire + bedrooms + depurado P99.9 desde S5) | Estable S1-S8 |
+| `modelo` | Modelo de trabajo (`lm` simple S4-S6, múltiple S7-S8) | Estable S4-S8 |
+
+**Variantes auxiliares**: cualquier objeto temporal o comparativo debe llevar sufijo claramente auxiliar.
+
+- ✅ `modelo_orig`, `modelo_aux`, `modelo_anterior`, `modelo_sin_x`, `roma_aux`
+- ❌ `modelo_full`, `modelo_clean`, `modelo_v2`, `modelo_final`, `roma_full` ← suenan al "principal" y confunden al alumno
+
+**Verificación al inicio de cada sesión**: el setup chunk debe asegurar (`stopifnot`) que los nombres canónicos heredados tienen las mismas dimensiones y coeficientes que la sesión previa publicó. Si falla, no continuar — investigar primero.
+
+**Regla técnica adicional para slides**: dentro de celdas de tablas `kable()` no usar `$` literal como prefijo de moneda — Reveal/MathJax lo interpreta como delimitador matemático y corrompe el render. Usar números planos y poner unidades en los labels (`Precio (MXN)`).
+
+**Caso histórico (S5)**: `roma_full` se introdujo como nombre intermedio que sonaba canónico. Los scripts de los alumnos se rompieron. Pendiente para postmortem: renombrar a `roma_aux` o eliminar el binding intermedio.
+
 ## Paleta de colores (consistente en todo el proyecto)
 
 ```

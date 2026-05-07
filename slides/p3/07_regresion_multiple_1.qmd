@@ -1,0 +1,603 @@
+---
+title: "Regresión múltiple I: construcción y 'controlando por'"
+subtitle: "Sesión 7 · Parcial 3 · Análisis de Datos II"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "[⌂ Inicio](../../index.html) · Análisis de Datos II — Sesión 7 · 6.1 Construcción · 6.2 Controlando por · 6.3 Variables categóricas"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+
+# Pipeline alineado con S1-S6
+listings <- read_csv("../../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+
+theme_curso <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      axis.title = element_text(color = "#2C3E50"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+
+# ---- Carga de S5 con fallback ----
+ruta_res    <- "../../datos/resultados_s05.rds"
+ruta_modelo <- "../../datos/modelo_s05.rds"
+
+if (file.exists(ruta_res) && file.exists(ruta_modelo)) {
+  res_s05            <- readRDS(ruta_res)
+  modelo_simple_aux  <- readRDS(ruta_modelo)
+} else {
+  warning("Artefactos de S5 no encontrados — recalculando pipeline depurado.")
+  roma_aux_recalc <- listings |>
+    filter(host_neighbourhood == "Roma Norte",
+           room_type == "Entire home/apt",
+           !is.na(bedrooms))
+  threshold_aux <- as.numeric(quantile(roma_aux_recalc$price, 0.999, na.rm = TRUE))
+  roma_aux_recalc <- roma_aux_recalc |> filter(price <= threshold_aux)
+  modelo_simple_aux <- lm(price ~ bedrooms, data = roma_aux_recalc)
+  res_s05 <- list(
+    n               = nrow(roma_aux_recalc),
+    intercepto      = round(coef(modelo_simple_aux)[["(Intercept)"]], 0),
+    pendiente       = round(coef(modelo_simple_aux)[["bedrooms"]], 0),
+    threshold_p99_9 = round(threshold_aux, 0),
+    pred_2rec       = round(as.numeric(predict(modelo_simple_aux,
+                                               newdata = data.frame(bedrooms = 2))), 0)
+  )
+}
+
+# ---- Reconstruir el subset canónico `roma` ----
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms),
+         price <= res_s05$threshold_p99_9) |>
+  mutate(superhost = factor(host_is_superhost,
+                            levels = c(FALSE, TRUE),
+                            labels = c("No", "Sí")))
+
+# ---- Verificación de continuidad ----
+stopifnot(
+  "n divergente entre S5 y S7"             = nrow(roma) == res_s05$n,
+  "Intercepto del modelo simple divergente" = abs(round(coef(modelo_simple_aux)[["(Intercept)"]]) - res_s05$intercepto) <= 1,
+  "Pendiente del modelo simple divergente"  = abs(round(coef(modelo_simple_aux)[["bedrooms"]])    - res_s05$pendiente)  <= 1
+)
+
+# ---- Modelos incrementales ----
+modelo_2vars_aux <- lm(price ~ bedrooms + accommodates,             data = roma)
+modelo           <- lm(price ~ bedrooms + accommodates + superhost, data = roma)  # ← canónico, M3
+
+res_simple <- summary(modelo_simple_aux)
+res_2vars  <- summary(modelo_2vars_aux)
+res_m3     <- summary(modelo)
+
+# ---- Coeficientes y SEs por modelo ----
+b1_simple   <- coef(modelo_simple_aux)[["bedrooms"]]
+b1_multiple <- coef(modelo_2vars_aux)[["bedrooms"]]
+b_acc_m2    <- coef(modelo_2vars_aux)[["accommodates"]]
+b1_m3       <- coef(modelo)[["bedrooms"]]
+b_acc_m3    <- coef(modelo)[["accommodates"]]
+b_sh_m3     <- coef(modelo)[["superhostSí"]]
+
+se_b1_simple   <- coef(res_simple)["bedrooms", "Std. Error"]
+se_b1_multiple <- coef(res_2vars)["bedrooms", "Std. Error"]
+se_sh_m3       <- coef(res_m3)["superhostSí", "Std. Error"]
+t_sh_m3        <- coef(res_m3)["superhostSí", "t value"]
+p_sh_m3        <- coef(res_m3)["superhostSí", "Pr(>|t|)"]
+
+# ---- t-test bivariado para tie-back con S2 ----
+t_test_aux <- t.test(price ~ superhost, data = roma)
+diff_bivariado <- t_test_aux$estimate[2] - t_test_aux$estimate[1]
+p_bivariado    <- t_test_aux$p.value
+
+# ---- Predicciones para Patricia (cap = 4) ----
+nuevos_simple <- data.frame(bedrooms = 2)
+nuevos_m2     <- data.frame(bedrooms = 2, accommodates = 4)
+nuevos_m3     <- data.frame(bedrooms = c(2, 2),
+                            accommodates = c(4, 4),
+                            superhost = factor(c("No", "Sí"),
+                                               levels = c("No", "Sí")))
+
+pi_simple <- predict(modelo_simple_aux, newdata = nuevos_simple,
+                     interval = "prediction", level = 0.95)
+pi_m2     <- predict(modelo_2vars_aux,  newdata = nuevos_m2,
+                     interval = "prediction", level = 0.95)
+pi_m3     <- predict(modelo, newdata = nuevos_m3,
+                     interval = "prediction", level = 0.95)
+
+ancho_simple <- pi_simple[1, "upr"] - pi_simple[1, "lwr"]
+ancho_m2     <- pi_m2[1, "upr"]     - pi_m2[1, "lwr"]
+ancho_m3     <- pi_m3[1, "upr"]     - pi_m3[1, "lwr"]
+
+pred_no <- pi_m3[1, "fit"]
+pred_si <- pi_m3[2, "fit"]
+premium <- pred_si - pred_no
+premium_pct <- 100 * premium / pred_no
+
+cor_bd_ac <- cor(roma$bedrooms, roma$accommodates)
+pct_sh    <- 100 * mean(roma$superhost == "Sí")
+
+# ---- Lista r7 para inline R ----
+r7 <- list(
+  fecha_corte_iso = fecha_corte_iso,
+  n               = nrow(roma),
+  # Coeficientes
+  b1_simple       = round(b1_simple, 0),
+  b1_multiple     = round(b1_multiple, 0),
+  b_acc_m2        = round(b_acc_m2, 0),
+  b1_m3           = round(b1_m3, 0),
+  b_acc_m3        = round(b_acc_m3, 0),
+  b_sh_m3         = round(b_sh_m3, 0),
+  # Cambios
+  cambio_b1_pct   = round(100 * (b1_multiple/b1_simple - 1), 0),
+  # R² incrementales
+  r2_simple       = round(res_simple$r.squared, 3),
+  r2_m2           = round(res_2vars$r.squared, 3),
+  r2_m3           = round(res_m3$r.squared, 3),
+  r2_aj_m3        = round(res_m3$adj.r.squared, 3),
+  delta_r2_pp     = round(100 * (res_2vars$r.squared - res_simple$r.squared), 1),
+  # RSE
+  rse_simple      = round(res_simple$sigma, 0),
+  rse_m2          = round(res_2vars$sigma, 0),
+  rse_m3          = round(res_m3$sigma, 0),
+  # Inflación de SE
+  se_b1_simple    = round(se_b1_simple, 0),
+  se_b1_multiple  = round(se_b1_multiple, 0),
+  se_inflation    = round(se_b1_multiple/se_b1_simple, 2),
+  # Anchos de PI
+  ancho_simple    = round(ancho_simple, 0),
+  ancho_m2        = round(ancho_m2, 0),
+  ancho_m3        = round(ancho_m3, 0),
+  reduccion_pi_pct = round(100 * (1 - ancho_m2/ancho_simple), 0),
+  # Predicciones Patricia
+  pred_no         = round(pred_no, 0),
+  pred_si         = round(pred_si, 0),
+  pi_lo_no        = round(pi_m3[1, "lwr"], 0),
+  pi_hi_no        = round(pi_m3[1, "upr"], 0),
+  pi_lo_no_trunc  = max(0, round(pi_m3[1, "lwr"], 0)),
+  pi_lo_si_trunc  = max(0, round(pi_m3[2, "lwr"], 0)),
+  pi_hi_si        = round(pi_m3[2, "upr"], 0),
+  premium         = round(premium, 0),
+  premium_pct     = round(premium_pct, 0),
+  # superhost tie-back
+  diff_bivariado  = round(diff_bivariado, 0),
+  p_bivariado     = round(p_bivariado, 3),
+  t_sh_m3         = round(t_sh_m3, 2),
+  p_sh_m3         = round(p_sh_m3, 3),
+  # Diagnóstico de variables
+  cor_bd_ac       = round(cor_bd_ac, 2),
+  pct_sh          = round(pct_sh, 0)
+)
+```
+
+# Recapitulación + pregunta de Patricia {background-color="#2C3E50"}
+
+## Lo que dejamos abierto en S6 {.smaller}
+
+S6 cerró con dos historias compatibles que el modelo simple **no podía distinguir**:
+
+::: {.incremental}
+- **Historia A**: el huésped paga por **espacio físico** (más recámaras → más espacio → más valor).
+- **Historia B**: el huésped paga por **capacidad** (más camas → más gente → más valor por noche).
+:::
+
+`bedrooms` y `accommodates` correlacionan a **`r r7$cor_bd_ac`** en Roma Norte. Con un solo modelo de una variable, era imposible separar A de B.
+
+## La pregunta de [Patricia]{.patricia} hoy {.smaller}
+
+> *"Un solo factor no alcanza. Sus mismos datos me sugirieron que recámaras puede ser sólo un proxy de algo más. Quiero estimar el precio **controlando por varias cosas a la vez** — y entender qué variables vale la pena meter al modelo y cuáles no."*
+
+::: {.callout-note}
+Hoy entramos al modelo lineal **múltiple**. La sintaxis cambia poco. La interpretación cambia mucho.
+:::
+
+# Mecánica del modelo múltiple {background-color="#18BC9C"}
+
+## Sintaxis: del simple al múltiple {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.30em;"}
+```{.r}
+# Simple (S5)
+modelo_simple <- lm(price ~ bedrooms,
+                    data = roma)
+
+# Múltiple (S7) — agregar variables con `+`
+modelo <- lm(price ~ bedrooms + accommodates,
+             data = roma)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+summary(modelo_2vars_aux)$coefficients |>
+  knitr::kable(digits = 3)
+```
+
+:::
+
+Cada variable adicional agrega un coeficiente. Todo lo que sabemos del summary (estimación, SE, t, p-valor) sigue válido — ahora aplicado a varias variables simultáneamente.
+
+## "Controlando por" — qué significa exactamente {.smaller}
+
+El coeficiente de `bedrooms` cambia entre el modelo simple y el múltiple:
+
+| Modelo | β_bedrooms | Lectura |
+|---|---|---|
+| Simple `~ bedrooms` | \$`r format(r7$b1_simple, big.mark=",")` | "Comparando deptos que difieren en una recámara, sin condicionar nada" |
+| Múltiple `~ bedrooms + accommodates` | \$`r format(r7$b1_multiple, big.mark=",")` | "Comparando deptos que difieren en una recámara **pero tienen la misma capacidad**" |
+
+::: {.callout-warning appearance="minimal"}
+Esa condición — *"manteniendo constante la capacidad"* — **es** "controlando por". El modelo le pide a R: *"dame el efecto único de bedrooms una vez que ya consideré el efecto de accommodates"*.
+:::
+
+# Resolución de las dos historias {background-color="#2C3E50"}
+
+## ¿Qué le pasó a β_bedrooms? {.smaller}
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Modelo = c("M1: solo bedrooms (S5)",
+             "M2: + accommodates"),
+  `β bedrooms (MXN/recámara)` = c(
+    format(r7$b1_simple,   big.mark = ","),
+    format(r7$b1_multiple, big.mark = ",")
+  ),
+  `β accommodates (MXN/persona)` = c(
+    "—",
+    format(r7$b_acc_m2, big.mark = ",")
+  )
+) |>
+  knitr::kable(align = "lrr")
+```
+
+::: {.incremental}
+- El efecto de bedrooms **bajó `r abs(r7$cambio_b1_pct)`%** al meter accommodates.
+- **Pero no se anuló.** Recámaras siguen pesando, sólo que menos de lo que parecía.
+- accommodates aporta ~\$`r format(r7$b_acc_m2, big.mark=",")` por persona adicional, manteniendo recámaras constantes.
+:::
+
+## El veredicto sobre las dos historias {.smaller}
+
+::: {.callout-note}
+**Ninguna historia es pura. Las dos son parcialmente verdaderas.**
+
+- Una recámara adicional, *con la misma capacidad*, sigue valiendo ~\$`r format(r7$b1_multiple, big.mark=",")` MXN/noche.
+- Una persona adicional de capacidad, *con las mismas recámaras*, vale ~\$`r format(r7$b_acc_m2, big.mark=",")` MXN/noche.
+
+El efecto bruto que veíamos en S5 (\$`r format(r7$b1_simple, big.mark=",")`) era una **combinación** de ambos. El modelo múltiple los separa.
+:::
+
+## Aplicación a [Patricia]{.patricia} con cap = 4 {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.30em;"}
+```{.r}
+predict(modelo,
+        newdata = data.frame(
+          bedrooms     = 2,
+          accommodates = 4))
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+predict(modelo_2vars_aux,
+        newdata = data.frame(bedrooms = 2, accommodates = 4)) |>
+  round(0)
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+La predicción para Patricia con M2 es **\$`r format(round(predict(modelo_2vars_aux, newdata = data.frame(bedrooms = 2, accommodates = 4))), big.mark=",")` MXN/noche** — distinta de la S6 porque ahora condicionamos en una capacidad específica (4 personas).
+:::
+
+# El costo del acoplamiento {background-color="#E74C3C"}
+
+## ¿Mejoró el modelo al agregar accommodates? {.smaller}
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Métrica = c("R²", "R² ajustada", "RSE (MXN)",
+              "SE de β_bedrooms (MXN)", "Ancho del PI 95% (MXN)"),
+  `M1: simple` = c(
+    sprintf("%.3f", r7$r2_simple),
+    sprintf("%.3f", res_simple$adj.r.squared),
+    format(r7$rse_simple, big.mark = ","),
+    format(r7$se_b1_simple, big.mark = ","),
+    format(r7$ancho_simple, big.mark = ",")
+  ),
+  `M2: + accommodates` = c(
+    sprintf("%.3f", r7$r2_m2),
+    sprintf("%.3f", res_2vars$adj.r.squared),
+    format(r7$rse_m2, big.mark = ","),
+    format(r7$se_b1_multiple, big.mark = ","),
+    format(r7$ancho_m2, big.mark = ",")
+  )
+) |>
+  knitr::kable(align = "lrr")
+```
+
+::: {.incremental}
+- R² subió **solo `r r7$delta_r2_pp` puntos porcentuales**.
+- RSE bajó solo \$`r format(r7$rse_simple - r7$rse_m2, big.mark=",")`.
+- **El ancho del intervalo de predicción se redujo solo `r r7$reduccion_pi_pct`%.**
+- **El SE de β_bedrooms se infló `r r7$se_inflation`×.**
+:::
+
+## ¿Por qué tan poca mejora? {.smaller}
+
+`bedrooms` y `accommodates` correlacionan a **`r r7$cor_bd_ac`**. Contienen información **muy redundante**.
+
+::: {.incremental}
+- El modelo no puede decidir cuánto del precio "le toca" a cada una.
+- Esa indecisión se manifiesta como **menos precisión** en cada coeficiente individual.
+- Pero la información combinada **no es mucho más** que la de cualquiera de las dos por separado.
+:::
+
+::: {.callout-warning}
+**Más variables ≠ mejor modelo.** Cuando una variable nueva es altamente redundante con las que ya tenemos, su aporte predictivo es marginal y aumenta el error estándar de los coeficientes existentes.
+:::
+
+## La lección operativa para selección {.smaller}
+
+::: {.callout-important}
+El criterio NO es *"agreguemos todo lo que se pueda"*.
+
+El criterio ES *"agreguemos variables que aporten información que las existentes no contienen"*.
+
+¿Cómo se ve eso en la práctica? Necesitamos una variable **no correlacionada** con bedrooms ni con accommodates. Tenemos una candidata limpia: **superhost**.
+:::
+
+# Una variable que sí aporta {background-color="#18BC9C"}
+
+## El dummy `superhost` — tie-back a S2 {.smaller}
+
+En **S2** comparamos directamente las medias de precio entre superhosts y no-superhosts (t-test):
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.30em;"}
+```{.r}
+t.test(price ~ superhost, data = roma)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+cat(sprintf("Diferencia de medias: %s MXN\n",
+            format(round(diff_bivariado), big.mark = ",")))
+cat(sprintf("Estadístico t = %.2f, p-valor = %.3f\n",
+            t_test_aux$statistic, p_bivariado))
+cat(sprintf("¿Rechaza H0 al 5%%? %s\n",
+            ifelse(p_bivariado < 0.05, "Sí", "No")))
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+**S2 concluyó**: la diferencia es positiva (~\$`r format(r7$diff_bivariado, big.mark=",")`) pero `r ifelse(r7$p_bivariado < 0.05, "estadísticamente significativa", "**no** estadísticamente significativa al 5%")`.
+:::
+
+## Sintaxis para variables categóricas {.smaller}
+
+`lm()` acepta variables tipo `factor` directamente — convierte automáticamente a dummies.
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.30em;"}
+```{.r}
+roma <- roma |>
+  mutate(superhost = factor(host_is_superhost,
+                            levels = c(FALSE, TRUE),
+                            labels = c("No", "Sí")))
+
+modelo <- lm(price ~ bedrooms + accommodates + superhost,
+             data = roma)
+summary(modelo)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+summary(modelo)$coefficients |>
+  knitr::kable(digits = 3)
+```
+
+:::
+
+R nombra el coeficiente como `superhostSí` — significa "el efecto de pasar de **No** a **Sí**, manteniendo todo lo demás constante".
+
+## El giro: la conclusión cambia al controlar {.smaller}
+
+| Análisis | Diferencia | p-valor | Conclusión |
+|---|---|---|---|
+| t-test bivariado (S2) | \$`r format(r7$diff_bivariado, big.mark=",")` | `r r7$p_bivariado` | `r ifelse(r7$p_bivariado < 0.05, "Significativo", "NO significativo al 5%")` |
+| β en M3 (controlando size) | \$`r format(r7$b_sh_m3, big.mark=",")` | `r r7$p_sh_m3` | `r ifelse(r7$p_sh_m3 < 0.05, "Significativo", "NO significativo al 5%")` |
+
+::: {.callout-important}
+**El efecto de superhost se vuelve más detectable al controlar por tamaño.** Sin controlar, la variabilidad por bedrooms y accommodates **ahogaba la señal**. Una vez que el modelo "explica" parte de esa variabilidad, el efecto puro de superhost emerge.
+
+Esto es exactamente lo que "controlar por" puede hacer — no solo cambia magnitud, también detectabilidad.
+:::
+
+## Aplicación a [Patricia]{.patricia}: dos escenarios {.smaller}
+
+Patricia es host **nuevo**. La certificación de superhost requiere historial — la considera un **objetivo aspiracional** para su primer año.
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Escenario = c("Sin superhost (estado inicial)",
+                "Con superhost (objetivo)"),
+  Predicción = c(format(r7$pred_no, big.mark = ","),
+                 format(r7$pred_si, big.mark = ",")),
+  `PI 95% (truncado, MXN)` = c(
+    paste0("[", format(r7$pi_lo_no_trunc, big.mark = ","),
+           " , ", format(r7$pi_hi_no, big.mark = ","), "]"),
+    paste0("[", format(r7$pi_lo_si_trunc, big.mark = ","),
+           " , ", format(r7$pi_hi_si, big.mark = ","), "]")
+  )
+) |>
+  knitr::kable(align = "lrr")
+```
+
+::: {.callout-note}
+**Premium estimado por superhost: ~\$`r format(r7$premium, big.mark=",")` MXN/noche** (≈ `r r7$premium_pct`% sobre la base).
+
+Información concreta para evaluar el costo-beneficio de la certificación: cumplir con tasa de respuesta, mantener tasa de aceptación, evitar cancelaciones.
+:::
+
+# Selección de variables + cierre {background-color="#2C3E50"}
+
+## R² ajustada como orientación, no regla {.smaller}
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Modelo = c("M1: solo bedrooms",
+             "M2: + accommodates",
+             "M3: + superhost"),
+  R2 = c(sprintf("%.3f", r7$r2_simple),
+         sprintf("%.3f", r7$r2_m2),
+         sprintf("%.3f", r7$r2_m3)),
+  R2_aj = c(sprintf("%.3f", res_simple$adj.r.squared),
+            sprintf("%.3f", res_2vars$adj.r.squared),
+            sprintf("%.3f", r7$r2_aj_m3))
+) |>
+  knitr::kable(align = "lrr",
+               col.names = c("Modelo", "R²", "R² ajustada"))
+```
+
+::: {.callout-warning appearance="minimal"}
+La R² ajustada **penaliza** agregar variables. Pero NO es un veredicto absoluto: una variable que apenas mejora R² ajustada puede ser indispensable si el objetivo es **interpretar un efecto** (entonces queremos controlar por confusores aunque no nos ayuden a predecir).
+:::
+
+## Tres criterios humanos para elegir variables {.smaller}
+
+::: {.incremental}
+1. **Relevancia teórica** — ¿hay razón para creer que la variable afecta el precio? Si sí, considérala. Si no, ignórala.
+2. **No redundancia** — si correlaciona >0.85 con otra ya incluida, su aporte es marginal y costoso.
+3. **Interpretabilidad** — si el coeficiente no tiene una historia clara, la variable es difícil de comunicar a Patricia.
+:::
+
+::: {.callout-note appearance="minimal"}
+La regresión múltiple **no es búsqueda automática** (stepwise / AIC / lasso). Es **construcción de juicio**. La pregunta operativa correcta no es "¿qué variables maximizan R²?" sino "¿qué variables hacen al modelo más útil para mi decisión?".
+:::
+
+## Lo que este modelo NO le dice a [Patricia]{.patricia} {.smaller}
+
+::: {.callout-important}
+- **El intervalo de predicción sigue ancho** (~\$`r format(r7$ancho_m3, big.mark=",")` de ancho). Hay heterogeneidad real entre deptos individuales que ningún modelo simple captura.
+- **No hemos diagnosticado los supuestos** del modelo múltiple. ¿Linealidad y homocedasticidad se mantienen? ¿La inclusión de variables correlacionadas tiene consecuencias técnicas? Eso es S8.
+- **No es causalidad establecida**. Aunque controlamos por capacidad, hay variables no medidas (m², ubicación específica, calidad de fotos, reseñas) que pueden estar moviendo el precio.
+- **`accommodates` con cor `r r7$cor_bd_ac`** está al borde de lo que muchos textos rechazarían por redundancia. Decisión deliberada para esta sesión: lo mantenemos para ilustrar el costo del acoplamiento; en S8 evaluamos si quedarnos con M3 o simplificar.
+:::
+
+## Entrega ejecutiva a [Patricia]{.patricia} {.smaller}
+
+::: {.callout-note appearance="minimal"}
+**Para su depto de 2 recámaras / 4 personas en Roma Norte:**
+
+- Las dos historias de S6 son ambas parciales. Recámaras Y capacidad pesan: separar sus efectos requirió controlar por ambas.
+- **Premium estimado por certificación de superhost: ~\$`r format(r7$premium, big.mark=",")` MXN/noche** (≈ `r r7$premium_pct`% sobre la base). Es palanca real con efecto comprobado.
+- **Predicción base (sin superhost):** ~\$`r format(r7$pred_no, big.mark=",")` MXN/noche. **Aspiracional (con superhost):** ~\$`r format(r7$pred_si, big.mark=",")`.
+- **Recomendación operativa**: buscar la certificación de superhost vale la pena. Sobre las recámaras: sin reformas no podemos cambiarlo, pero la capacidad sí podría aumentarse marginalmente (sofá-cama, literas) capturando parte del efecto que el modelo atribuye a accommodates.
+- **Lo que falta:** diagnóstico del modelo y caso integrador final. Eso es la próxima sesión.
+:::
+
+# Actividad para notebook {background-color="#18BC9C"}
+
+## Lo que harán en su notebook {.smaller}
+
+Repliquen y extiendan el análisis:
+
+1. Cargar `modelo_s05.rds` (o reconstruirlo). Verificar continuidad con S5.
+2. Construir M1, M2, M3 incrementalmente.
+3. Producir la tabla comparativa: β_bedrooms, R², RSE, SE de β_bedrooms y ancho de PI por modelo.
+4. Identificar y comentar el cambio de β_bedrooms al pasar de M1 a M2.
+5. Calcular `predict()` con `interval = "prediction"` para Patricia en M3 (con y sin superhost).
+6. Reproducir el t-test bivariado de S2 para superhost y compararlo con el coeficiente en M3.
+7. Redactar la **entrega ejecutiva** (≈250 palabras) con:
+   - Resolución de las dos historias
+   - Premium estimado por superhost
+   - Recomendación sobre la certificación
+
+# Próxima sesión {background-color="#2C3E50"}
+
+## Lo que llevan hoy {.smaller}
+
+1. **Sintaxis múltiple**: `lm(y ~ x1 + x2 + ...)`. Cada `+` agrega un coeficiente.
+2. **"Controlando por"** = "comparando con TODAS las demás variables iguales".
+3. **Las dos historias eran ambas parciales** — separar requiere modelar las dos juntas.
+4. **Más variables ≠ mejor modelo**: agregar variables redundantes infla SEs sin mejorar predicción.
+5. **El efecto de una variable puede emerger al controlar** por confusores (caso superhost).
+6. **Selección de variables es juicio**, no algoritmo: relevancia + no redundancia + interpretabilidad.
+
+## Sesión 8 — Regresión múltiple II {.smaller}
+
+> *"Entrega final: un modelo que pueda defender y una recomendación concreta sobre cómo listar."*
+
+::: {.incremental}
+- **Diagnóstico** del modelo múltiple: ¿se cumplen los supuestos cuando hay variables correlacionadas?
+- **Identificación formal** del problema de redundancia (lo que llevamos viendo conductualmente).
+- **Caso integrador**: el modelo definitivo de la consultora para Patricia.
+- **Defensa de la recomendación** ante la cliente.
+:::
+
+**Sesión 8: Regresión múltiple II — diagnóstico, interpretación, caso integrador.**

@@ -1,0 +1,568 @@
+---
+title: "Análisis completo · Sesión 7"
+subtitle: "Regresión múltiple I: construcción y 'controlando por'"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> **Propósito.** Análisis completo que subyace a la presentación de la Sesión 7. Resuelve el cliffhanger de S6 (¿es la palanca recámaras o capacidad?), expone el costo del acoplamiento entre variables correlacionadas, y abre la conversación sobre selección de variables con un dummy limpio (`superhost`).
+>
+> **Continuidad con S5/S6.** Carga `datos/modelo_s05.rds` y `datos/resultados_s05.rds`. Verifica con `stopifnot` que los nombres canónicos heredados coinciden. Si los `.rds` no existen, recalcula el pipeline depurado en línea (con advertencia).
+>
+> **No se publica.** Vive en `analisis/`, excluida del render.
+
+## 1. Setup y herencia de S5
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Pipeline alineado con S1-S6
+listings <- read_csv("../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+# Fecha del snapshot
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+
+colores <- list(
+  primary = "#2C3E50",
+  accent  = "#18BC9C",
+  info    = "#3498DB",
+  warn    = "#F39C12",
+  danger  = "#E74C3C",
+  light   = "#ECF0F1"
+)
+
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", color = colores$primary),
+      plot.subtitle = element_text(color = "#7F8C8D"),
+      axis.title = element_text(color = colores$primary),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = colores$light)
+    )
+}
+```
+
+### 1.1 Carga de artefactos de S5 con fallback
+
+```{r}
+ruta_res    <- "../datos/resultados_s05.rds"
+ruta_modelo <- "../datos/modelo_s05.rds"
+
+if (file.exists(ruta_res) && file.exists(ruta_modelo)) {
+  res_s05            <- readRDS(ruta_res)
+  modelo_simple_aux  <- readRDS(ruta_modelo)
+  fuente_s05         <- "rds"
+  message("Artefactos de S5 cargados desde .rds")
+} else {
+  warning("Artefactos de S5 no encontrados — recalculando pipeline depurado en línea. ",
+          "Idealmente, ejecuta primero analisis/05_patricia_diagnostico.qmd.")
+  roma_aux_recalc <- listings |>
+    filter(host_neighbourhood == "Roma Norte",
+           room_type == "Entire home/apt",
+           !is.na(bedrooms))
+  threshold_aux <- as.numeric(quantile(roma_aux_recalc$price, 0.999, na.rm = TRUE))
+  roma_aux_recalc <- roma_aux_recalc |> filter(price <= threshold_aux)
+
+  modelo_simple_aux <- lm(price ~ bedrooms, data = roma_aux_recalc)
+  res_s05 <- list(
+    n               = nrow(roma_aux_recalc),
+    intercepto      = round(coef(modelo_simple_aux)[["(Intercept)"]], 0),
+    pendiente       = round(coef(modelo_simple_aux)[["bedrooms"]], 0),
+    threshold_p99_9 = round(threshold_aux, 0),
+    pred_2rec       = round(as.numeric(predict(modelo_simple_aux,
+                                               newdata = data.frame(bedrooms = 2))), 0)
+  )
+  fuente_s05 <- "recalculado"
+}
+
+cat("Fuente S5:", fuente_s05, "\n")
+```
+
+### 1.2 Reconstruir el subset canónico `roma`
+
+```{r}
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms),
+         price <= res_s05$threshold_p99_9)
+
+cat("Listings en `roma` (depurado):", nrow(roma), "\n")
+cat("Threshold P99.9 heredado:      ", res_s05$threshold_p99_9, "\n")
+```
+
+### 1.3 Verificación de continuidad con S5
+
+```{r}
+match_n  <- nrow(roma) == res_s05$n
+match_b0 <- abs(round(coef(modelo_simple_aux)[["(Intercept)"]]) - res_s05$intercepto) <= 1
+match_b1 <- abs(round(coef(modelo_simple_aux)[["bedrooms"]])    - res_s05$pendiente)  <= 1
+
+cat(sprintf("nrow(roma) = %d   |  S5 publicó n = %d   |  match: %s\n",
+            nrow(roma), res_s05$n, match_n))
+cat(sprintf("β₀ simple = %s   |  S5: %s   |  match: %s\n",
+            format(round(coef(modelo_simple_aux)[["(Intercept)"]]), big.mark = ","),
+            format(res_s05$intercepto, big.mark = ","), match_b0))
+cat(sprintf("β₁ simple = %s   |  S5: %s   |  match: %s\n",
+            format(round(coef(modelo_simple_aux)[["bedrooms"]]), big.mark = ","),
+            format(res_s05$pendiente, big.mark = ","), match_b1))
+
+stopifnot(
+  "n divergente entre S5 y S7 — pipeline cambió" = match_n,
+  "Intercepto del modelo simple divergente"      = match_b0,
+  "Pendiente del modelo simple divergente"       = match_b1
+)
+```
+
+### 1.4 Preparar la variable categórica `superhost`
+
+```{r}
+roma <- roma |>
+  mutate(superhost = factor(host_is_superhost,
+                            levels = c(FALSE, TRUE),
+                            labels = c("No", "Sí")))
+
+# Estado del dummy
+roma |>
+  count(superhost) |>
+  mutate(pct = round(100 * n / sum(n), 1)) |>
+  kable(col.names = c("Superhost", "n", "% del subset"))
+```
+
+## 2. La pregunta de S6 que vamos a resolver
+
+> *"¿Es que más recámaras CAUSA mayor precio? ¿O es que los deptos con más recámaras tienden a tener más capacidad, y la capacidad es lo que el huésped paga?"*
+
+Dos historias compatibles:
+
+- **Historia A**: el huésped paga por **espacio físico** (más recámaras → más espacio → más valor).
+- **Historia B**: el huésped paga por **capacidad** (más camas → más gente → más valor).
+
+El modelo `price ~ bedrooms` no podía distinguirlas porque `bedrooms` y `accommodates` correlacionan a `r round(cor(roma$bedrooms, roma$accommodates), 2)`. Hoy lo separamos.
+
+## 3. Mecánica del modelo múltiple
+
+### 3.1 Sintaxis: del simple al múltiple
+
+```{r}
+# Modelo simple (S5) — ya cargado como modelo_simple_aux
+# Modelo múltiple — agregar variables con `+`
+modelo_2vars_aux <- lm(price ~ bedrooms + accommodates, data = roma)
+
+summary(modelo_2vars_aux)
+```
+
+La sintaxis es directa: cada variable adicional se agrega con `+`. Todo lo que sabíamos leer del summary (coeficientes, errores estándar, t, p-valor, R², F) sigue siendo válido — solo que ahora hay un coeficiente por cada variable.
+
+### 3.2 "Controlando por" — qué significa exactamente
+
+El coeficiente de `bedrooms` en el modelo múltiple **no es el mismo** que en el simple.
+
+```{r}
+b1_simple   <- coef(modelo_simple_aux)[["bedrooms"]]
+b1_multiple <- coef(modelo_2vars_aux)[["bedrooms"]]
+
+cat(sprintf("β_bedrooms en modelo simple:    %s MXN\n",
+            format(round(b1_simple), big.mark = ",")))
+cat(sprintf("β_bedrooms en modelo con accommodates: %s MXN\n",
+            format(round(b1_multiple), big.mark = ",")))
+cat(sprintf("Cambio: %s MXN (%.0f%%)\n",
+            format(round(b1_multiple - b1_simple), big.mark = ","),
+            100 * (b1_multiple/b1_simple - 1)))
+```
+
+**La interpretación cambia con la especificación:**
+
+- **Simple**: "deptos con una recámara más tienden a costar β₁ más, sin condicionar nada".
+- **Múltiple**: "deptos con una recámara más tienden a costar β₁ más, **manteniendo constante** la capacidad (accommodates)".
+
+Es decir: comparamos deptos con misma capacidad pero distinto número de recámaras. **Eso es "controlando por".**
+
+## 4. Resolución de las dos historias
+
+### 4.1 ¿Qué le pasó a β_bedrooms?
+
+```{r}
+b_acc <- coef(modelo_2vars_aux)[["accommodates"]]
+
+cat(sprintf("β_bedrooms (controlando por capacidad) = %s MXN/recámara\n",
+            format(round(b1_multiple), big.mark = ",")))
+cat(sprintf("β_accommodates (controlando por recámaras) = %s MXN/persona\n",
+            format(round(b_acc), big.mark = ",")))
+```
+
+**Lectura.** Comparando deptos en Roma Norte que tienen la misma capacidad declarada pero difieren en una recámara, los precios estimados difieren en ~$`r format(round(b1_multiple), big.mark = ",")`. Y comparando deptos con el mismo número de recámaras pero distinta capacidad, los precios difieren en ~$`r format(round(b_acc), big.mark = ",")` por cada persona adicional de capacidad.
+
+**Conclusión sobre las dos historias.** Ninguna pura. **Ambas son parcialmente verdaderas.** El efecto de recámaras se mantiene (`r format(round(b1_multiple), big.mark = ",")` MXN, contra los `r format(round(b1_simple), big.mark = ",")` del modelo simple), pero **se reduce un `r round(100*(1 - b1_multiple/b1_simple))`%**. La parte que perdió pertenecía en realidad a la capacidad.
+
+### 4.2 Aplicación a Patricia con `accommodates = 4`
+
+Patricia tiene 2 recámaras y capacidad declarada 4 personas. Compararemos las dos predicciones.
+
+```{r}
+nuevos_aux <- data.frame(bedrooms = 2, accommodates = 4)
+
+pred_simple_aux <- predict(modelo_simple_aux, newdata = nuevos_aux)
+pred_2vars_aux  <- predict(modelo_2vars_aux,  newdata = nuevos_aux)
+
+cat(sprintf("Pred S5 (modelo simple, 2 rec):                  %s MXN\n",
+            format(round(pred_simple_aux), big.mark = ",")))
+cat(sprintf("Pred M2 (controlando por cap=4, 2 rec + 4 pers): %s MXN\n",
+            format(round(pred_2vars_aux), big.mark = ",")))
+cat(sprintf("Diferencia: %s MXN\n",
+            format(round(pred_2vars_aux - pred_simple_aux), big.mark = ",")))
+```
+
+La predicción cambió porque ahora condicionamos en una capacidad específica (4 personas). En el modelo simple, esa información estaba "promediada implícitamente" — ahora la estamos usando explícitamente.
+
+## 5. El costo del acoplamiento
+
+S6 esperaba que la regresión múltiple **mejorara** la precisión de la predicción. Veamos si fue así.
+
+### 5.1 R² y RSE: ¿mejoró el modelo?
+
+```{r}
+res_simple <- summary(modelo_simple_aux)
+res_2vars  <- summary(modelo_2vars_aux)
+
+cat("Modelo simple (S5):\n")
+cat(sprintf("  R²  = %.4f,  R² ajustada = %.4f\n",
+            res_simple$r.squared, res_simple$adj.r.squared))
+cat(sprintf("  RSE = %s MXN\n",
+            format(round(res_simple$sigma), big.mark = ",")))
+
+cat("\nModelo con accommodates (M2):\n")
+cat(sprintf("  R²  = %.4f,  R² ajustada = %.4f\n",
+            res_2vars$r.squared, res_2vars$adj.r.squared))
+cat(sprintf("  RSE = %s MXN\n",
+            format(round(res_2vars$sigma), big.mark = ",")))
+
+cat(sprintf("\nMejora en R²: +%.2f puntos porcentuales\n",
+            100 * (res_2vars$r.squared - res_simple$r.squared)))
+cat(sprintf("Reducción de RSE: %s MXN (%.1f%%)\n",
+            format(round(res_simple$sigma - res_2vars$sigma), big.mark = ","),
+            100 * (1 - res_2vars$sigma / res_simple$sigma)))
+```
+
+**Lectura.** Apenas mejoró. El R² subió ~`r round(100*(res_2vars$r.squared - res_simple$r.squared), 1)` puntos porcentuales y el RSE bajó solo ~$`r format(round(res_simple$sigma - res_2vars$sigma), big.mark=",")`. Para una variable con correlación 0.88 con bedrooms, eso es **muy poca aportación**.
+
+### 5.2 El error estándar de β_bedrooms se duplica
+
+```{r}
+se_b1_simple   <- coef(res_simple)["bedrooms", "Std. Error"]
+se_b1_multiple <- coef(res_2vars)["bedrooms", "Std. Error"]
+
+cat(sprintf("SE de β_bedrooms en modelo simple:    %.0f\n", se_b1_simple))
+cat(sprintf("SE de β_bedrooms en modelo múltiple:  %.0f\n", se_b1_multiple))
+cat(sprintf("Factor de inflación: %.2fx\n", se_b1_multiple/se_b1_simple))
+```
+
+El error estándar **se infló `r round(se_b1_multiple/se_b1_simple, 1)`x**. ¿Por qué? Porque cuando dos variables están altamente correlacionadas, el modelo no puede separar bien sus efectos individuales — le cuesta decidir cuánto del precio "le toca" a cada una. Esa indecisión se manifiesta como menos precisión en cada coeficiente individual.
+
+### 5.3 ¿Qué pasa con el intervalo de predicción?
+
+```{r}
+pi_simple <- predict(modelo_simple_aux,
+                     newdata = data.frame(bedrooms = 2),
+                     interval = "prediction", level = 0.95)
+pi_2vars  <- predict(modelo_2vars_aux,
+                     newdata = data.frame(bedrooms = 2, accommodates = 4),
+                     interval = "prediction", level = 0.95)
+
+ancho_simple <- pi_simple[1, "upr"] - pi_simple[1, "lwr"]
+ancho_2vars  <- pi_2vars[1, "upr"]  - pi_2vars[1, "lwr"]
+
+cat(sprintf("Ancho del PI 95%% modelo simple (S6):    %s MXN\n",
+            format(round(ancho_simple), big.mark = ",")))
+cat(sprintf("Ancho del PI 95%% modelo con accommodates: %s MXN\n",
+            format(round(ancho_2vars), big.mark = ",")))
+cat(sprintf("Reducción: %.1f%%\n",
+            100 * (1 - ancho_2vars/ancho_simple)))
+```
+
+**El PI casi no se redujo.** Agregamos una variable correlacionada al 0.88 con bedrooms — y la mejora en precisión de predicción es marginal.
+
+### 5.4 La lección
+
+::: {.callout-warning}
+**Más variables ≠ mejor modelo.** Cuando una variable nueva está altamente correlacionada con las que ya tenemos, su aporte a la predicción es mínimo y aumenta el error estándar de los coeficientes existentes. Lo que ganamos en interpretación (separar el efecto de bedrooms del de capacidad) lo pagamos en precisión.
+
+**El criterio de selección no es "agreguemos todo lo que se pueda".** Es "agreguemos variables que aporten información que las existentes no contienen".
+:::
+
+## 6. Una variable que sí aporta: `superhost`
+
+`superhost` es una variable lógica (TRUE/FALSE) — un dummy. No correlaciona con bedrooms ni con accommodates de manera fuerte:
+
+```{r}
+roma_num <- roma |>
+  mutate(superhost_num = as.integer(superhost == "Sí"))
+
+cor(roma_num |> select(bedrooms, accommodates, superhost_num)) |>
+  round(2) |>
+  kable()
+```
+
+`superhost` tiene correlación `r round(cor(roma_num$bedrooms, roma_num$superhost_num), 2)` con bedrooms — esencialmente independiente. Al agregarla al modelo, **no debería sufrir el costo del acoplamiento**.
+
+### 6.1 Tie-back a S2: el t-test bivariado
+
+En S2 hicimos el t-test de medias entre superhosts y no-superhosts en Roma Norte. Lo reproducimos aquí (sobre el subset depurado, que difiere ligeramente).
+
+```{r}
+t_test_aux <- t.test(price ~ superhost, data = roma)
+
+cat(sprintf("Diferencia de medias: %s MXN\n",
+            format(round(t_test_aux$estimate[2] - t_test_aux$estimate[1]),
+                   big.mark = ",")))
+cat(sprintf("Estadístico t: %.2f, p-valor: %.4f\n",
+            t_test_aux$statistic, t_test_aux$p.value))
+cat(sprintf("¿Rechaza H0 al 5%%? %s\n",
+            ifelse(t_test_aux$p.value < 0.05, "Sí", "No")))
+```
+
+**Resultado bivariado**: la diferencia es positiva pero `r ifelse(t_test_aux$p.value < 0.05, "estadísticamente significativa", "no alcanza significancia estadística al 5%")`.
+
+### 6.2 El modelo múltiple con superhost (M3)
+
+```{r}
+modelo <- lm(price ~ bedrooms + accommodates + superhost, data = roma)
+res_m3 <- summary(modelo)
+res_m3
+```
+
+```{r}
+b_sh <- coef(modelo)[["superhostSí"]]
+se_sh <- coef(res_m3)["superhostSí", "Std. Error"]
+t_sh  <- coef(res_m3)["superhostSí", "t value"]
+p_sh  <- coef(res_m3)["superhostSí", "Pr(>|t|)"]
+
+cat(sprintf("β_superhost (controlando por bedrooms y accommodates):\n"))
+cat(sprintf("  Estimación: %s MXN\n", format(round(b_sh), big.mark = ",")))
+cat(sprintf("  SE: %.0f, t: %.2f, p-valor: %.4f\n", se_sh, t_sh, p_sh))
+cat(sprintf("  ¿Rechaza H0 al 5%%? %s\n",
+            ifelse(p_sh < 0.05, "Sí", "No")))
+```
+
+### 6.3 Comparación: bivariado vs condicional
+
+| Análisis | β | p-valor | Conclusión |
+|---|---|---|---|
+| t-test bivariado (S2) | $`r format(round(t_test_aux$estimate[2] - t_test_aux$estimate[1]), big.mark=",")` | `r round(t_test_aux$p.value, 3)` | `r ifelse(t_test_aux$p.value < 0.05, "Significativo", "NO significativo")` |
+| Coef. en M3 (controlando por size) | $`r format(round(b_sh), big.mark=",")` | `r round(p_sh, 3)` | `r ifelse(p_sh < 0.05, "Significativo", "NO significativo")` |
+
+**La lección.** El efecto de superhost se vuelve más detectable cuando controlamos por tamaño. La razón es que sin controlar, la **variabilidad** del precio entre deptos de distintos tamaños ahoga la señal del superhost. Una vez que el modelo "explica" parte de esa variabilidad con bedrooms y accommodates, el residual en el que vive el efecto de superhost es más limpio y la señal emerge.
+
+::: {.callout-note}
+**Esto es exactamente lo que "controlar por" puede hacer**: no solo cambia la magnitud de un efecto (S2 daba `r format(round(t_test_aux$estimate[2] - t_test_aux$estimate[1]), big.mark=",")`, M3 da `r format(round(b_sh), big.mark=",")`) sino también su **detectabilidad**.
+:::
+
+### 6.4 Aplicación a Patricia: dos escenarios
+
+Patricia es host **nuevo** en Airbnb. Por reglas de la plataforma, no puede ser superhost al inicio — la certificación requiere historial de reservas y reseñas. Pero ella podría aspirar a obtenerla en su primer año.
+
+Mostremos ambas predicciones para que pueda evaluar el costo-beneficio de buscar la certificación.
+
+```{r}
+nuevos_patricia <- data.frame(
+  bedrooms     = c(2, 2),
+  accommodates = c(4, 4),
+  superhost    = factor(c("No", "Sí"), levels = c("No", "Sí"))
+)
+
+pred_patricia <- predict(modelo, newdata = nuevos_patricia,
+                         interval = "prediction", level = 0.95)
+
+resultados_patricia <- tibble::tibble(
+  Escenario = c("Sin superhost (estado inicial)",
+                "Con superhost (objetivo aspiracional)"),
+  Predicción       = round(pred_patricia[, "fit"], 0),
+  PI_inferior      = round(pred_patricia[, "lwr"], 0),
+  PI_inferior_trun = pmax(0, round(pred_patricia[, "lwr"], 0)),
+  PI_superior      = round(pred_patricia[, "upr"], 0)
+)
+
+resultados_patricia |>
+  kable(format.args = list(big.mark = ","),
+        col.names = c("Escenario", "Predicción", "PI inferior (crudo)",
+                      "PI inferior (truncado)", "PI superior"))
+```
+
+```{r}
+pred_no  <- pred_patricia[1, "fit"]
+pred_si  <- pred_patricia[2, "fit"]
+premium  <- pred_si - pred_no
+premium_pct <- 100 * premium / pred_no
+pi_lo_no <- max(0, pred_patricia[1, "lwr"])
+pi_hi_no <- pred_patricia[1, "upr"]
+pi_lo_si <- max(0, pred_patricia[2, "lwr"])
+pi_hi_si <- pred_patricia[2, "upr"]
+
+cat(sprintf("Premium estimado por superhost: %s MXN/noche (%.1f%% sobre la base)\n",
+            format(round(premium), big.mark = ","),
+            premium_pct))
+```
+
+**Comunicación práctica para Patricia**: si logra certificarse como superhost, el modelo estima un premium de **~$`r format(round(premium), big.mark=",")` MXN/noche** (≈ `r round(premium_pct, 0)`% de mejora sobre la base). Eso es información concreta para evaluar si vale la pena el esfuerzo (responder más rápido a mensajes, mantener tasa de aceptación alta, evitar cancelaciones).
+
+## 7. Selección de variables: heurística humana
+
+La pregunta natural es: ¿cuántas variables más debería tener el modelo? El instinto inmediato es "agreguemos todas las que tenemos en el dataset". El instinto correcto es **opuesto**: agregar variables solo cuando aportan información que las anteriores no contienen.
+
+### 7.1 R² ajustada como orientación, no regla
+
+```{r}
+adj_r2 <- c(
+  "M1: solo bedrooms"               = res_simple$adj.r.squared,
+  "M2: + accommodates"               = res_2vars$adj.r.squared,
+  "M3: + superhost"                  = res_m3$adj.r.squared
+)
+
+tibble::tibble(
+  Modelo = names(adj_r2),
+  R2_aj  = round(adj_r2, 4)
+) |> kable(col.names = c("Modelo", "R² ajustada"))
+```
+
+**Cuidado**: R² ajustada *penaliza* agregar variables, pero no es un veredicto absoluto. Una variable que apenas mejora R² ajustada puede ser indispensable si el objetivo es **interpretar un efecto** (en cuyo caso queremos controlar por confusores aunque no nos ayuden a predecir).
+
+### 7.2 Tres criterios humanos
+
+1. **Relevancia teórica**: ¿hay razón para creer que la variable afecta el precio? `accommodates` sí (tamaño efectivo). `host_listings_count` quizás (calidad / profesionalismo). El número del listado en sí: no.
+2. **No redundancia**: si una variable correlaciona >0.85 con otra ya incluida, su aporte es marginal y costoso (lección de M2).
+3. **Interpretabilidad**: si el coeficiente no tiene una historia clara, la variable es difícil de comunicar a Patricia.
+
+### 7.3 Por qué mantenemos accommodates en M3 a pesar de la redundancia
+
+Decisión deliberada: mantener accommodates aunque su aporte predictivo sea marginal. **Razón**: queremos poder afirmar el efecto de bedrooms *manteniendo capacidad constante*. Si quitáramos accommodates, β_bedrooms volvería a $`r format(round(b1_simple), big.mark = ",")` y volveríamos a no poder distinguir las dos historias.
+
+::: {.callout-warning}
+La elección entre M2 y M3 (y entre incluir o no accommodates) **depende del objetivo**. Si Patricia quiere predecir precio: el modelo simple es casi tan bueno y más fácil. Si quiere entender por qué se paga lo que se paga: necesita accommodates en el modelo. **Pedagógicamente preferimos M3 para esta sesión** porque ilustra ambos comportamientos (acoplamiento con accommodates, aporte limpio con superhost).
+:::
+
+## 8. Comunicación ejecutiva a Patricia
+
+```{r}
+veredicto_corto <- paste0(
+  "M3 (bedrooms + accommodates + superhost). β_bedrooms cae 35% al ",
+  "controlar por capacidad: las dos historias de S6 son ambas parciales. ",
+  "Adición de accommodates barely mejora predicción (+",
+  round(100 * (res_2vars$r.squared - res_simple$r.squared), 1),
+  " pp R²). superhost emerge como significativo conditional on size. ",
+  "Premium superhost ~", format(round(premium), big.mark = ","),
+  " MXN/noche (", round(premium_pct, 0), "%)."
+)
+```
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Modelo múltiple — qué cambia con varias variables**
+
+Cumplimos lo prometido en la sesión anterior: separamos el efecto del **número de recámaras** del efecto de la **capacidad declarada en Airbnb**. Lo que aprendimos:
+
+**Las dos historias son ambas parcialmente verdaderas.** El efecto bruto de cada recámara adicional bajó de ~$`r format(round(b1_simple), big.mark=",")` MXN/noche (modelo simple) a ~$`r format(round(b1_multiple), big.mark=",")` MXN/noche (controlando por capacidad). Es decir: **una parte del efecto que le atribuíamos a recámaras realmente le pertenece a la capacidad** que esas recámaras habilitan. Una recámara que aumenta la capacidad efectiva (con sofá-cama, literas) podría capturar parte de ese efecto sin requerir construcción.
+
+**Pero el modelo no se volvió más preciso.** Agregar capacidad apenas redujo el rango de predicción (~`r round(100*(1 - ancho_2vars/ancho_simple))`%). Razón: capacidad y recámaras están muy correlacionadas (ρ = `r round(cor(roma$bedrooms, roma$accommodates), 2)`); contienen información parcialmente redundante. **Más variables no es automáticamente mejor.**
+
+**La certificación de superhost sí aporta.** Después de controlar por tamaño, los superhosts cobran ~$`r format(round(premium), big.mark=",")` MXN/noche más en promedio (~`r round(premium_pct, 0)`% de premium). Para su decto, eso significaría aproximadamente **$`r format(round(pred_si), big.mark=",")` MXN/noche** si lograra la certificación, vs **$`r format(round(pred_no), big.mark=",")` MXN/noche** sin ella.
+
+**Recomendación operativa.** Buscar la certificación de superhost vale la pena — es una palanca real con efecto comprobado de orden de magnitud claro. Sobre las recámaras: sin reformas, no podemos cambiar ese factor; pero la capacidad sí podría aumentarse marginalmente con muebles que duermen extra (sofá-cama, literas), capturando parte del efecto que el modelo atribuye a accommodates.
+
+**Lo que aún falta.** El intervalo de predicción sigue siendo ancho ($`r format(round(pi_lo_no), big.mark=",")` a $`r format(round(pi_hi_no), big.mark=",")` para el escenario sin superhost). Hay variables que el modelo aún no incluye (m², ubicación específica dentro de Roma Norte, calidad de fotos, reseñas). En la próxima sesión diagnosticamos el modelo, vemos si los supuestos se sostienen, y decidimos si hay variables adicionales que vale la pena considerar.
+:::
+
+## 9. Persistencia de resultados
+
+```{r}
+# β y SE de bedrooms en cada modelo
+se_b1_m3 <- coef(res_m3)["bedrooms", "Std. Error"]
+
+resultados_s07 <- list(
+  # === Modelo final (M3) ===
+  b0_m3            = round(coef(modelo)[["(Intercept)"]], 0),
+  b_bedrooms_m3    = round(coef(modelo)[["bedrooms"]], 0),
+  b_accommodates_m3 = round(coef(modelo)[["accommodates"]], 0),
+  b_superhost_m3   = round(b_sh, 0),
+  r2_m3            = round(res_m3$r.squared, 4),
+  r2_aj_m3         = round(res_m3$adj.r.squared, 4),
+  rse_m3           = round(res_m3$sigma, 0),
+  df_residual_m3   = res_m3$df[2],
+  # === Progresión incremental ===
+  b_bedrooms_m1    = round(b1_simple, 0),
+  b_bedrooms_m2    = round(b1_multiple, 0),
+  cambio_b_bedrooms_pct = round(100 * (b1_multiple/b1_simple - 1), 1),
+  r2_m1            = round(res_simple$r.squared, 4),
+  r2_m2            = round(res_2vars$r.squared, 4),
+  rse_m1           = round(res_simple$sigma, 0),
+  rse_m2           = round(res_2vars$sigma, 0),
+  se_bedrooms_m1   = round(se_b1_simple, 0),
+  se_bedrooms_m2   = round(se_b1_multiple, 0),
+  se_inflation_factor = round(se_b1_multiple/se_b1_simple, 2),
+  # === Variables y subset ===
+  cor_bedrooms_acc = round(cor(roma$bedrooms, roma$accommodates), 3),
+  pct_superhost    = round(100 * mean(roma$superhost == "Sí"), 1),
+  n                = nrow(roma),
+  # === Predicciones para Patricia con M3 ===
+  pred_sin_superhost  = round(pred_no, 0),
+  pred_con_superhost  = round(pred_si, 0),
+  pi_lo_sin           = round(pred_patricia[1, "lwr"], 0),
+  pi_hi_sin           = round(pi_hi_no, 0),
+  pi_lo_truncado_sin  = round(pi_lo_no, 0),
+  pi_lo_con           = round(pred_patricia[2, "lwr"], 0),
+  pi_hi_con           = round(pi_hi_si, 0),
+  pi_lo_truncado_con  = round(pi_lo_si, 0),
+  premium_superhost   = round(premium, 0),
+  premium_pct         = round(premium_pct, 1),
+  pi_ancho_m3         = round(pred_patricia[1, "upr"] - pred_patricia[1, "lwr"], 0),
+  # === Comparación con S6 ===
+  pi_ancho_simple     = round(ancho_simple, 0),
+  pi_ancho_2vars      = round(ancho_2vars, 0),
+  reduccion_pi_pct    = round(100 * (1 - ancho_2vars/ancho_simple), 1),
+  # === Tie-back a S2 ===
+  diff_bivariado_s2   = round(t_test_aux$estimate[2] - t_test_aux$estimate[1], 0),
+  p_bivariado_s2      = round(t_test_aux$p.value, 4),
+  p_superhost_m3      = round(p_sh, 4),
+  # === Verificación de continuidad ===
+  match_n_s5          = match_n,
+  match_b1_s5         = match_b1,
+  fuente_s05          = fuente_s05,
+  # === Veredicto cualitativo ===
+  veredicto           = veredicto_corto,
+  # === Contexto temporal ===
+  fecha_corte_iso     = fecha_corte_iso
+)
+
+saveRDS(resultados_s07, "../datos/resultados_s07.rds")
+
+# Persistir el modelo final preferido (M3) para que S8 lo diagnostique
+saveRDS(modelo, "../datos/modelo_s07.rds")
+
+message("Resultados guardados en datos/resultados_s07.rds")
+message("Modelo M3 guardado    en datos/modelo_s07.rds")
+```

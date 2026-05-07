@@ -1,0 +1,513 @@
+---
+title: "Análisis completo · Sesión 6"
+subtitle: "Regresión simple III: interpretación, predicción y causalidad"
+author: "Consultora de Análisis (equipo docente)"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    df-print: kable
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+> **Propósito.** Análisis completo que subyace a la presentación de la Sesión 6. Carga el modelo depurado de S5, construye sobre él la respuesta operativa para Patricia (rango de predicción defendible), aborda explícitamente la lectura causal vs asociativa, y entrega un párrafo profesional comunicable.
+>
+> **Continuidad con S5.** Carga `datos/modelo_s05.rds` y `datos/resultados_s05.rds`. Si no existen, recalcula el pipeline depurado en línea (con advertencia). Verifica con `stopifnot` que los nombres canónicos heredados coinciden con los publicados en S5.
+>
+> **No se publica.** Vive en `analisis/`, excluida del render.
+
+## 1. Setup y herencia de S5
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Pipeline alineado con S1-S5
+listings <- read_csv("../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+# Fecha del snapshot
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+fecha_corte_txt  <- paste0(
+  as.integer(format(fecha_corte_date, "%d")), " de ",
+  meses_es[as.integer(format(fecha_corte_date, "%m"))], " de ",
+  format(fecha_corte_date, "%Y")
+)
+
+colores <- list(
+  primary = "#2C3E50",
+  accent  = "#18BC9C",
+  info    = "#3498DB",
+  warn    = "#F39C12",
+  danger  = "#E74C3C",
+  light   = "#ECF0F1"
+)
+
+theme_curso <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", color = colores$primary),
+      plot.subtitle = element_text(color = "#7F8C8D"),
+      axis.title = element_text(color = colores$primary),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = colores$light)
+    )
+}
+```
+
+### 1.1 Carga de artefactos de S5 con fallback
+
+```{r}
+ruta_res    <- "../datos/resultados_s05.rds"
+ruta_modelo <- "../datos/modelo_s05.rds"
+
+if (file.exists(ruta_res) && file.exists(ruta_modelo)) {
+  res_s05    <- readRDS(ruta_res)
+  modelo     <- readRDS(ruta_modelo)
+  fuente_s05 <- "rds"
+  message("Artefactos de S5 cargados desde .rds")
+} else {
+  warning("Artefactos de S5 no encontrados — recalculando pipeline depurado en línea. ",
+          "Idealmente, ejecuta primero analisis/05_patricia_diagnostico.qmd.")
+  # Reconstruir el modelo depurado tal cual lo definió S5
+  roma_aux <- listings |>
+    filter(host_neighbourhood == "Roma Norte",
+           room_type == "Entire home/apt",
+           !is.na(bedrooms))
+  threshold_aux <- as.numeric(quantile(roma_aux$price, 0.999, na.rm = TRUE))
+  roma_aux <- roma_aux |> filter(price <= threshold_aux)
+
+  modelo <- lm(price ~ bedrooms, data = roma_aux)
+  res_s05 <- list(
+    n               = nrow(roma_aux),
+    intercepto      = round(coef(modelo)[["(Intercept)"]], 0),
+    pendiente       = round(coef(modelo)[["bedrooms"]], 0),
+    threshold_p99_9 = round(threshold_aux, 0),
+    pred_2rec       = round(as.numeric(predict(modelo,
+                                               newdata = data.frame(bedrooms = 2))), 0)
+  )
+  fuente_s05 <- "recalculado"
+}
+
+cat("Fuente de S5:", fuente_s05, "\n")
+```
+
+### 1.2 Reconstruir el subset canónico `roma`
+
+```{r}
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms),
+         price <= res_s05$threshold_p99_9)
+
+cat("Listings en `roma` (depurado):", nrow(roma), "\n")
+cat("Threshold P99.9 heredado:      ", res_s05$threshold_p99_9, "\n")
+```
+
+### 1.3 Verificación de continuidad con S5
+
+```{r}
+match_n  <- nrow(roma) == res_s05$n
+match_b0 <- abs(round(coef(modelo)[["(Intercept)"]]) - res_s05$intercepto) <= 1
+match_b1 <- abs(round(coef(modelo)[["bedrooms"]])    - res_s05$pendiente)  <= 1
+
+cat(sprintf("nrow(roma) = %d   |  S5 publicó n = %d   |  match: %s\n",
+            nrow(roma), res_s05$n, match_n))
+cat(sprintf("β₀ = %s   |  S5 publicó %s   |  match: %s\n",
+            format(round(coef(modelo)[["(Intercept)"]]), big.mark = ","),
+            format(res_s05$intercepto, big.mark = ","), match_b0))
+cat(sprintf("β₁ = %s   |  S5 publicó %s   |  match: %s\n",
+            format(round(coef(modelo)[["bedrooms"]]), big.mark = ","),
+            format(res_s05$pendiente, big.mark = ","), match_b1))
+
+stopifnot(
+  "n divergente entre S5 y S6 — pipeline cambió" = match_n,
+  "Intercepto divergente"                         = match_b0,
+  "Pendiente divergente"                          = match_b1
+)
+```
+
+Coeficientes y subset consistentes con S5. Procedemos.
+
+### 1.4 Coeficientes de trabajo
+
+```{r}
+b0 <- coef(modelo)[["(Intercept)"]]
+b1 <- coef(modelo)[["bedrooms"]]
+res_modelo <- summary(modelo)
+```
+
+## 2. Recordatorio interpretativo de β₀ y β₁
+
+Con todo el contexto de S4 y S5, ahora podemos releer los coeficientes de forma más rica.
+
+### 2.1 β₀ — el intercepto, en su lugar
+
+```{r}
+cat(sprintf("β₀ = %s MXN\n", format(round(b0), big.mark = ",")))
+```
+
+`bedrooms = 0` corresponde a estudios. En el subset depurado hay `r sum(roma$bedrooms == 0)` estudios. El intercepto técnico estimado es \$`r format(round(b0), big.mark = ",")`. Si es negativo, **no significa que un estudio cuesta menos que cero**: es el valor matemático que mejor posiciona la recta dada la nube de datos. La interpretación útil empieza en `bedrooms ≥ 1`, donde sí hay información sustantiva.
+
+### 2.2 β₁ — la pendiente, lo que sí dice y lo que no
+
+```{r}
+cat(sprintf("β₁ = %s MXN/recámara\n", format(round(b1), big.mark = ",")))
+```
+
+**Lo que dice.** Comparando deptos en Roma Norte que difieren en una recámara, los precios estimados difieren en promedio en **\$`r format(round(b1), big.mark = ",")` MXN/noche**.
+
+**Lo que NO dice.**
+
+- No dice que **agregar** una recámara *cause* un aumento de \$`r format(round(b1), big.mark = ",")`.
+- No dice que **un depto en particular** vaya a tener exactamente esa diferencia.
+- No incluye el efecto de tamaño en m², ubicación específica, amenidades, calidad del host, reseñas o capacidad.
+
+La distinción entre asociación y causalidad la trabajamos en la sección 4. Antes, cerramos la pregunta operativa de Patricia: ¿qué precio le decimos?
+
+## 3. De la predicción puntual al rango defendible
+
+S5 nos dejó una predicción puntual para 2 recámaras: **\$`r format(res_s05$pred_2rec, big.mark = ",")` MXN/noche**. Patricia ahora pide rango. Hay dos rangos distintos que `lm()` puede entregar — y confundirlos es el error más común al comunicar resultados.
+
+### 3.1 IC para la media condicional E[Y | X = 2]
+
+```{r}
+nuevos <- data.frame(bedrooms = 2)
+
+ic_media <- predict(modelo, newdata = nuevos, interval = "confidence", level = 0.95)
+ic_media |> round(0)
+```
+
+```{r}
+pred_2rec  <- as.numeric(ic_media[, "fit"])
+ci_lo      <- as.numeric(ic_media[, "lwr"])
+ci_hi      <- as.numeric(ic_media[, "upr"])
+ci_ancho   <- ci_hi - ci_lo
+
+cat(sprintf("IC 95%% para E[Y | bedrooms = 2] = [%s , %s]\n",
+            format(round(ci_lo), big.mark = ","),
+            format(round(ci_hi), big.mark = ",")))
+cat(sprintf("Ancho = %s MXN\n", format(round(ci_ancho), big.mark = ",")))
+```
+
+**Interpretación.** *Si pudiéramos repetir el muestreo de listings de Roma Norte muchas veces, en el 95% de las muestras el promedio condicional de precio entre deptos de 2 recámaras estaría dentro de este intervalo.*
+
+Es un intervalo sobre la **media** de muchos deptos de 2 recámaras — no sobre **un** depto en particular.
+
+### 3.2 IC para la predicción individual Y | X = 2
+
+```{r}
+ic_pred <- predict(modelo, newdata = nuevos, interval = "prediction", level = 0.95)
+ic_pred |> round(0)
+```
+
+```{r}
+pi_lo    <- as.numeric(ic_pred[, "lwr"])
+pi_hi    <- as.numeric(ic_pred[, "upr"])
+pi_ancho <- pi_hi - pi_lo
+
+cat(sprintf("IC 95%% predicción para un depto nuevo de 2 recámaras = [%s , %s]\n",
+            format(round(pi_lo), big.mark = ","),
+            format(round(pi_hi), big.mark = ",")))
+cat(sprintf("Ancho = %s MXN\n", format(round(pi_ancho), big.mark = ",")))
+```
+
+**Interpretación.** *Si listamos un depto nuevo de 2 recámaras (como el de Patricia), en el 95% de los casos su precio caerá dentro de este intervalo.*
+
+Este es el rango operativo para Patricia: cubre la variabilidad **entre deptos individuales**, no solo la incertidumbre sobre el promedio.
+
+### 3.3 El contraste numérico
+
+```{r}
+razon <- pi_ancho / ci_ancho
+
+cat(sprintf("Ancho del IC para la media:        %s MXN\n",
+            format(round(ci_ancho), big.mark = ",")))
+cat(sprintf("Ancho del IC de predicción:        %s MXN\n",
+            format(round(pi_ancho), big.mark = ",")))
+cat(sprintf("Razón de anchos (predicción/media): %.1fx\n", razon))
+```
+
+El rango para predicción es **~`r round(razon, 0)` veces más ancho** que el rango para la media. Esa diferencia es lo que distingue *"sé bien dónde está el promedio del mercado"* de *"sé qué precio espero para un depto en particular"*.
+
+### 3.4 Visualización contrastante
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+grid_aux <- data.frame(bedrooms = seq(0, 9, by = 0.1))
+ci_aux <- as.data.frame(predict(modelo, newdata = grid_aux,
+                                interval = "confidence", level = 0.95))
+pi_aux <- as.data.frame(predict(modelo, newdata = grid_aux,
+                                interval = "prediction", level = 0.95))
+bandas_aux <- bind_cols(grid_aux,
+                        fit   = ci_aux$fit,
+                        ci_lo = ci_aux$lwr, ci_hi = ci_aux$upr,
+                        pi_lo = pi_aux$lwr, pi_hi = pi_aux$upr)
+
+ggplot() +
+  # Banda ancha de predicción (al fondo)
+  geom_ribbon(data = bandas_aux,
+              aes(x = bedrooms, ymin = pi_lo, ymax = pi_hi),
+              fill = colores$danger, alpha = 0.15) +
+  # Banda angosta de confianza (encima)
+  geom_ribbon(data = bandas_aux,
+              aes(x = bedrooms, ymin = ci_lo, ymax = ci_hi),
+              fill = colores$primary, alpha = 0.4) +
+  # Datos
+  geom_jitter(data = roma, aes(x = bedrooms, y = price),
+              width = 0.15, alpha = 0.3, color = colores$accent) +
+  # Recta ajustada
+  geom_line(data = bandas_aux, aes(x = bedrooms, y = fit),
+            color = colores$primary, linewidth = 1.2) +
+  # Punto de Patricia
+  annotate("point", x = 2, y = pred_2rec,
+           color = colores$danger, size = 4) +
+  annotate("text", x = 2.3, y = pred_2rec,
+           label = paste0("Patricia: ", format(round(pred_2rec), big.mark = ",")),
+           color = colores$danger, hjust = 0, size = 4.5, fontface = "bold") +
+  scale_y_continuous(labels = label_comma()) +
+  scale_x_continuous(breaks = 0:9) +
+  labs(
+    x = "Recámaras", y = "Precio (MXN por noche)",
+    title = "Predicción puntual vs por intervalo",
+    subtitle = paste0("Banda angosta (azul) = IC 95% para la media · ",
+                      "banda ancha (rojo) = IC 95% de predicción individual"),
+    caption = paste0("Roma Norte · n = ", nrow(roma),
+                     " · corte ", fecha_corte_iso)
+  ) +
+  theme_curso()
+```
+
+La nube de puntos verde es la **realidad del mercado**: deptos individuales con todas sus particularidades. La banda ancha roja **encuadra esa nube**; la banda azul angosta solo refleja precisión sobre el promedio.
+
+### 3.5 Aplicación al depto de Patricia
+
+```{r}
+# Versión cruda (lo que entrega el modelo)
+cat("=== Salida cruda del modelo ===\n")
+cat(sprintf("Predicción puntual: %s MXN\n", format(round(pred_2rec), big.mark = ",")))
+cat(sprintf("IC media (95%%):     [%s , %s]\n",
+            format(round(ci_lo), big.mark = ","),
+            format(round(ci_hi), big.mark = ",")))
+cat(sprintf("IC predicción (95%%): [%s , %s]\n",
+            format(round(pi_lo), big.mark = ","),
+            format(round(pi_hi), big.mark = ",")))
+
+# Versión truncada para comunicación ejecutiva
+pi_lo_truncado <- max(0, pi_lo)
+cat("\n=== Versión para comunicación ejecutiva ===\n")
+cat(sprintf("Rango defendible: %s a %s MXN/noche\n",
+            format(round(pi_lo_truncado), big.mark = ","),
+            format(round(pi_hi), big.mark = ",")))
+if (pi_lo < 0) {
+  cat("(El extremo inferior se truncó en 0; el modelo lineal no respeta no-negatividad de precios.)\n")
+}
+```
+
+::: {.callout-warning}
+**Lectura honesta del PI inferior.** El intervalo de predicción crudo da un extremo inferior que puede ser negativo (\$`r format(round(pi_lo), big.mark = ",")` en este caso). No es un error de cálculo: el modelo lineal asume errores normales simétricos, y en datos reales con asimetría en precios los extremos pueden caer en zonas matemáticamente posibles pero económicamente absurdas. **Para comunicación ejecutiva, truncar en 0 es honesto** siempre que se comunique la operación.
+:::
+
+### 3.6 Extrapolación: ¿qué pasa fuera del rango típico?
+
+```{r}
+# ¿Cuántos listings hay en cada nivel de bedrooms?
+roma |> count(bedrooms) |>
+  kable(col.names = c("Recámaras", "n"))
+```
+
+```{r}
+# Predicción con intervalos para bedrooms = 8 (zona casi vacía)
+nuevos_8 <- data.frame(bedrooms = 8)
+ic_media_8 <- predict(modelo, newdata = nuevos_8, interval = "confidence")
+ic_pred_8  <- predict(modelo, newdata = nuevos_8, interval = "prediction")
+
+pred_8rec  <- as.numeric(ic_media_8[, "fit"])
+pi_lo_8    <- as.numeric(ic_pred_8[, "lwr"])
+pi_hi_8    <- as.numeric(ic_pred_8[, "upr"])
+ci_lo_8    <- as.numeric(ic_media_8[, "lwr"])
+ci_hi_8    <- as.numeric(ic_media_8[, "upr"])
+
+n_en_8 <- sum(roma$bedrooms == 8)
+
+cat(sprintf("Predicción para 8 recámaras: %s MXN\n",
+            format(round(pred_8rec), big.mark = ",")))
+cat(sprintf("IC media (95%%):  [%s , %s]\n",
+            format(round(ci_lo_8), big.mark = ","),
+            format(round(ci_hi_8), big.mark = ",")))
+cat(sprintf("IC predicción:    [%s , %s]\n",
+            format(round(pi_lo_8), big.mark = ","),
+            format(round(pi_hi_8), big.mark = ",")))
+cat(sprintf("\nListings con exactamente 8 recámaras en el subset: %d\n", n_en_8))
+```
+
+**Lección.** Para `bedrooms = 8` el modelo entrega un intervalo aparentemente preciso, pero **no hay datos en ese punto**. La aritmética del intervalo no avisa esa ausencia: ese rango es *teórico*, sostenido sobre supuestos (linealidad continúa fuera del rango muestreado) que no podemos validar. **Cuanto más lejos del centro de los datos, menos defendible es la predicción**, sin importar qué tan estrecho sea el intervalo numérico.
+
+## 4. Causalidad vs correlación
+
+### 4.1 ¿La pendiente es causal?
+
+Cuando reportamos *"cada recámara adicional se asocia con +\$`r format(round(b1), big.mark = ",")` MXN/noche"*, estamos describiendo una **asociación observada** en datos transversales. Para que esto fuera una afirmación causal, tendríamos que poder decir: *"si tomáramos el mismo depto y le agregáramos una recámara, su precio justo subiría en \$`r format(round(b1), big.mark = ",")`"*. Eso requiere intervención (real o hipotética), no observación.
+
+El obstáculo conceptual se llama **sesgo por variable omitida** (omitted variable bias): si una tercera variable está correlacionada con `bedrooms` Y afecta `price`, parte de lo que atribuimos a `bedrooms` en realidad pertenece a esa tercera variable.
+
+### 4.2 Variable confusora candidata: `accommodates`
+
+`accommodates` (capacidad declarada en Airbnb) es un candidato natural a confusora.
+
+```{r}
+cor_be_ac <- cor(roma$bedrooms, roma$accommodates)
+cat(sprintf("Correlación bedrooms ~ accommodates: %.3f\n", cor_be_ac))
+```
+
+```{r}
+modelo_acc_aux <- lm(price ~ accommodates, data = roma)
+b1_acc <- coef(modelo_acc_aux)[["accommodates"]]
+r2_acc <- summary(modelo_acc_aux)$r.squared
+
+cat(sprintf("lm(price ~ accommodates): β₁ = %s,  R² = %.3f\n",
+            format(round(b1_acc), big.mark = ","),
+            r2_acc))
+```
+
+**El problema.** `bedrooms` y `accommodates` están correlacionadas a `r round(cor_be_ac, 2)`. El modelo simple `price ~ accommodates` por sí solo explica `r round(100 * r2_acc)`% de la variación en precio, casi tanto como `price ~ bedrooms`. **No podemos saber, con regresión simple, cuánto del efecto que vemos en `bedrooms` realmente le pertenece a `bedrooms` y cuánto le pertenece a la capacidad.**
+
+### 4.3 ¿La gente paga por recámaras o por capacidad?
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+ggplot(roma, aes(x = factor(bedrooms), y = accommodates)) +
+  geom_jitter(width = 0.2, height = 0.2, alpha = 0.3, color = colores$accent) +
+  scale_y_continuous(breaks = seq(0, 16, by = 2)) +
+  labs(x = "Recámaras", y = "Capacidad declarada (personas)",
+       title = "Recámaras y capacidad están fuertemente acopladas",
+       subtitle = paste0("cor = ", round(cor_be_ac, 2),
+                         " — separar sus efectos requiere regresión múltiple")) +
+  theme_curso()
+```
+
+Dos historias compatibles con los datos:
+
+1. **Historia A**: el huésped paga por **espacio físico** (más recámaras → más espacio → más valor).
+2. **Historia B**: el huésped paga por **capacidad** (más camas → puede hospedar más gente → más valor por noche, dividido entre más personas el huésped acepta pagar más por noche).
+
+El modelo `price ~ bedrooms` **no puede distinguir** entre ambas. Y casi todas las decisiones que Patricia podría tomar dependen de cuál sea la verdadera: si es Historia B, agregar literas o sofá-cama (sin agregar recámara) sería suficiente para subir el precio.
+
+### 4.4 Sembrando "controlando por" para S7
+
+La regresión múltiple permitirá estimar el efecto de `bedrooms` **manteniendo constante** `accommodates`. Esa es la operación técnica de *"controlando por"*.
+
+::: {.callout-note appearance="minimal"}
+**No es una receta mágica para causalidad.** "Controlar por" ajusta por variables observables. Si la verdadera causa es algo que no medimos (calidad del decorado, posición exacta de la calle, calidad del host), ningún modelo de regresión la captura. La regresión múltiple **reduce** el sesgo por variable omitida; no lo elimina.
+:::
+
+## 5. Comunicación ejecutiva a Patricia
+
+```{r}
+veredicto_txt <- paste0(
+  "Predicción puntual: $", format(round(pred_2rec), big.mark = ","), " MXN/noche. ",
+  "Rango defendible (truncado en 0): $",
+  format(round(pi_lo_truncado), big.mark = ","), " a $",
+  format(round(pi_hi), big.mark = ","), " MXN/noche. ",
+  "Lectura: asociación, no causa establecida. Necesitamos al menos accommodates ",
+  "como variable adicional antes de afirmar que recámaras es la palanca de precio."
+)
+```
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Rango de precios defendible y lectura del modelo**
+
+Cerramos el bloque de regresión simple con una entrega operativa.
+
+**Lo que sabemos con confianza alta.** En Roma Norte, en propiedades completas, los precios por noche se asocian con el número de recámaras: cada recámara adicional **se asocia con** un aumento de \$`r format(round(b1), big.mark = ",")` MXN/noche en promedio (IC 95% del coeficiente: \$`r format(round(confint(modelo, "bedrooms")[1]), big.mark = ",")` a \$`r format(round(confint(modelo, "bedrooms")[2]), big.mark = ",")`).
+
+**Predicción para su depto de 2 recámaras.** Punto: **\$`r format(round(pred_2rec), big.mark = ",")` MXN/noche**. Pero un punto sin rango es engañoso: el modelo entrega dos rangos distintos.
+
+- **Rango sobre la media del mercado** (95%): \$`r format(round(ci_lo), big.mark = ",")` a \$`r format(round(ci_hi), big.mark = ",")`. Este responde *"¿en qué rango estará el precio promedio de muchos deptos como el suyo?"*.
+- **Rango defendible para SU depto** (95%): \$`r format(round(pi_lo_truncado), big.mark = ",")` a \$`r format(round(pi_hi), big.mark = ",")`. Este responde *"¿en qué rango caerá probablemente el precio de UN depto como el suyo?"*. Es ~`r round(razon, 0)` veces más ancho que el rango sobre la media. Es el que importa para su decisión.
+
+**Por qué el rango defendible es tan amplio.** Porque hay mucha heterogeneidad entre deptos individuales que el modelo simple no captura: tamaño en m², ubicación específica dentro de Roma Norte, amenidades, calidad de las fotos y reseñas. El modelo solo conoce el número de recámaras.
+
+**Lectura causal: precaución importante.** El modelo dice *"deptos con más recámaras tienden a costar más"*, no *"agregar una recámara causa un aumento de precio"*. Detectamos un candidato a confusor: la **capacidad declarada en Airbnb** está fuertemente correlacionada con recámaras (ρ = `r round(cor_be_ac, 2)`). No sabemos si lo que mueve el precio es el número de recámaras como tal, o la capacidad que esas recámaras habilitan.
+
+**Recomendación operativa para esta etapa.**
+
+1. Use el **rango defendible** como referencia de planeación, no la predicción puntual.
+2. Considere que la decisión de precio fino requiere variables adicionales — lo trabajaremos en la próxima sesión.
+3. Antes de invertir en remodelaciones que agreguen recámaras, esperemos al modelo múltiple: puede ser que la palanca real sea capacidad, no número de recámaras.
+
+**Próxima sesión.** Construimos un modelo con `bedrooms` y `accommodates` simultáneamente, para estimar el efecto de cada uno *manteniendo constante* el otro. Eso es lo que llamamos **regresión múltiple**, y es lo que separa "asociación general" de "asociación condicionada".
+:::
+
+## 6. Persistencia de resultados
+
+```{r}
+# Veredicto cualitativo (cadena corta para resultados_s06.rds)
+veredicto_corto <- paste0(
+  "Pred puntual ", round(pred_2rec),
+  "; rango defendible truncado [", round(pi_lo_truncado),
+  ", ", round(pi_hi), "]; ",
+  "razón PI/CI = ", round(razon, 1), "x; ",
+  "asociación, no causalidad establecida (confusor candidato: accommodates, ",
+  "ρ = ", round(cor_be_ac, 2), ")."
+)
+
+resultados_s06 <- list(
+  # Predicción puntual
+  pred_2rec        = round(pred_2rec, 0),
+  # Intervalo de confianza para la media condicional
+  ci_lo_2rec       = round(ci_lo, 0),
+  ci_hi_2rec       = round(ci_hi, 0),
+  ci_ancho_2rec    = round(ci_ancho, 0),
+  # Intervalo de predicción individual (crudo y truncado)
+  pi_lo_2rec       = round(pi_lo, 0),
+  pi_hi_2rec       = round(pi_hi, 0),
+  pi_lo_truncado   = round(pi_lo_truncado, 0),
+  pi_ancho_2rec    = round(pi_ancho, 0),
+  # Razón pedagógica
+  razon_pi_ci      = round(razon, 1),
+  # Extrapolación a x=8
+  pred_8rec        = round(pred_8rec, 0),
+  pi_lo_8rec       = round(pi_lo_8, 0),
+  pi_hi_8rec       = round(pi_hi_8, 0),
+  n_en_8           = n_en_8,
+  # Confusora candidata: accommodates
+  cor_bedrooms_acc = round(cor_be_ac, 3),
+  b1_acc_solo      = round(b1_acc, 0),
+  r2_acc_solo      = round(r2_acc, 3),
+  # Verificación de continuidad
+  match_n          = match_n,
+  match_b0         = match_b0,
+  match_b1         = match_b1,
+  fuente_s05       = fuente_s05,
+  # Veredicto
+  veredicto        = veredicto_corto,
+  # Contexto
+  fecha_corte_iso  = fecha_corte_iso
+)
+
+saveRDS(resultados_s06, "../datos/resultados_s06.rds")
+message("Resultados guardados en datos/resultados_s06.rds")
+```
