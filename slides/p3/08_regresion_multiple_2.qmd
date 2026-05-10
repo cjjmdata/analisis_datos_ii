@@ -1,0 +1,633 @@
+---
+title: "Regresión múltiple II: diagnóstico, interpretación y caso integrador"
+subtitle: "Sesión 8 · Parcial 3 · Análisis de Datos II · Cierre del semestre"
+author: "CJJM"
+date: today
+date-format: "D [de] MMMM, YYYY"
+lang: es
+format:
+  revealjs:
+    theme: [default, ../../estilo-slides.scss]
+    slide-number: c/t
+    chalkboard: true
+    logo: ../../assets/img/logo.png
+    footer: "[⌂ Inicio](../../index.html) · Análisis de Datos II — Sesión 8 · 6.4 Diagnóstico · 6.5 Multicolinealidad · 6.6 Caso integrador"
+    incremental: false
+    fig-align: center
+    code-line-numbers: false
+    highlight-style: github
+    transition: fade
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(scales)
+
+# Pipeline alineado con S1-S7
+listings <- read_csv("../../datos/listings_cdmx_raw.csv.gz",
+                     show_col_types = FALSE) |>
+  mutate(price = parse_number(price)) |>
+  filter(!is.na(price))
+
+meses_es <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre",
+              "diciembre")
+fecha_corte_date <- max(listings$last_scraped, na.rm = TRUE)
+fecha_corte_iso  <- format(fecha_corte_date, "%Y-%m-%d")
+
+theme_curso <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", color = "#2C3E50"),
+      plot.subtitle = element_text(color = "#95A5A6"),
+      axis.title = element_text(color = "#2C3E50"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#ECF0F1")
+    )
+}
+
+# ---- Carga de S7 con fallback ----
+ruta_modelo_s07 <- "../../datos/modelo_s07.rds"
+ruta_res_s07    <- "../../datos/resultados_s07.rds"
+
+if (file.exists(ruta_modelo_s07) && file.exists(ruta_res_s07)) {
+  modelo  <- readRDS(ruta_modelo_s07)
+  res_s07 <- readRDS(ruta_res_s07)
+} else {
+  warning("Artefactos de S7 no encontrados — recalculando M3 en línea.")
+  roma_aux_recalc <- listings |>
+    filter(host_neighbourhood == "Roma Norte",
+           room_type == "Entire home/apt",
+           !is.na(bedrooms))
+  threshold_recalc <- as.numeric(quantile(roma_aux_recalc$price, 0.999, na.rm = TRUE))
+  roma_aux_recalc <- roma_aux_recalc |>
+    filter(price <= threshold_recalc) |>
+    mutate(superhost = factor(host_is_superhost,
+                              levels = c(FALSE, TRUE),
+                              labels = c("No", "Sí")))
+  modelo <- lm(price ~ bedrooms + accommodates + superhost, data = roma_aux_recalc)
+  res_s07 <- list(
+    n                 = nrow(roma_aux_recalc),
+    threshold_p99_9   = round(threshold_recalc, 0),
+    intercepto        = round(coef(modelo)[["(Intercept)"]], 0),
+    pendiente         = round(coef(modelo)[["bedrooms"]], 0),
+    b_bedrooms_m3     = round(coef(modelo)[["bedrooms"]], 0),
+    b_accommodates_m3 = round(coef(modelo)[["accommodates"]], 0),
+    b_superhost_m3    = round(coef(modelo)[["superhostSí"]], 0)
+  )
+}
+
+# ---- Reconstruir roma canónico ----
+roma <- listings |>
+  filter(host_neighbourhood == "Roma Norte",
+         room_type == "Entire home/apt",
+         !is.na(bedrooms),
+         price <= res_s07$threshold_p99_9) |>
+  mutate(superhost = factor(host_is_superhost,
+                            levels = c(FALSE, TRUE),
+                            labels = c("No", "Sí")))
+
+# ---- Verificación de continuidad con S7 ----
+b_bd_publicado <- if (!is.null(res_s07$b_bedrooms_m3)) res_s07$b_bedrooms_m3 else res_s07$pendiente
+stopifnot(
+  "n divergente entre S7 y S8" = nrow(roma) == res_s07$n,
+  "β_bedrooms divergente"      = abs(round(coef(modelo)[["bedrooms"]]) - b_bd_publicado) <= 1
+)
+
+# ---- Coeficientes M3 ----
+b0   <- coef(modelo)[["(Intercept)"]]
+b_bd <- coef(modelo)[["bedrooms"]]
+b_ac <- coef(modelo)[["accommodates"]]
+b_sh <- coef(modelo)[["superhostSí"]]
+res_m3 <- summary(modelo)
+
+# ---- Diagnóstico de supuestos en M3 ----
+# Trabajamos con vectores de fitted/residuals (longitud = filas usadas por lm,
+# que puede ser menor que nrow(roma) si hay NAs en accommodates/superhost).
+ajustado_aux  <- fitted(modelo)
+residuo_aux   <- residuals(modelo)
+abs_resid_aux <- abs(residuo_aux)
+n_modelo_aux  <- length(residuo_aux)
+
+df_diag_aux <- tibble::tibble(
+  ajustado  = ajustado_aux,
+  residuo   = residuo_aux,
+  abs_resid = abs_resid_aux
+)
+
+cor_het <- cor(abs_resid_aux, ajustado_aux)
+resid_std_aux <- (residuo_aux - mean(residuo_aux)) / sd(residuo_aux)
+asimetria_aux <- mean(resid_std_aux^3)
+kurtosis_aux  <- mean(resid_std_aux^4) - 3
+res_std_aux <- rstandard(modelo)
+cooks_aux   <- cooks.distance(modelo)
+n_outliers_std <- sum(abs(res_std_aux) > 3, na.rm = TRUE)
+pct_outliers   <- 100 * n_outliers_std / n_modelo_aux
+cook_max       <- max(cooks_aux, na.rm = TRUE)
+
+# ---- VIFs ----
+mod_vif_bd_aux <- lm(bedrooms ~ accommodates + superhost, data = roma)
+vif_bd <- 1 / (1 - summary(mod_vif_bd_aux)$r.squared)
+mod_vif_ac_aux <- lm(accommodates ~ bedrooms + superhost, data = roma)
+vif_ac <- 1 / (1 - summary(mod_vif_ac_aux)$r.squared)
+roma_num_aux <- roma |> mutate(sh_num = as.integer(superhost == "Sí"))
+mod_vif_sh_aux <- lm(sh_num ~ bedrooms + accommodates, data = roma_num_aux)
+vif_sh <- 1 / (1 - summary(mod_vif_sh_aux)$r.squared)
+
+# ---- Modelos candidatos para comparación ----
+modelo_simple_aux <- lm(price ~ bedrooms,                            data = roma)
+modelo_2vars_aux  <- lm(price ~ bedrooms + accommodates,              data = roma)
+modelo_alt_aux    <- lm(price ~ bedrooms + superhost,                 data = roma)
+
+# ---- Predicciones para Patricia ----
+nuevos_patricia <- data.frame(
+  bedrooms     = c(2, 2),
+  accommodates = c(4, 4),
+  superhost    = factor(c("No", "Sí"), levels = c("No", "Sí"))
+)
+pred_patricia <- predict(modelo, newdata = nuevos_patricia,
+                         interval = "prediction", level = 0.95)
+pred_no  <- pred_patricia[1, "fit"]
+pred_si  <- pred_patricia[2, "fit"]
+pi_lo_no <- pred_patricia[1, "lwr"]
+pi_hi_no <- pred_patricia[1, "upr"]
+pi_lo_si <- pred_patricia[2, "lwr"]
+pi_hi_si <- pred_patricia[2, "upr"]
+pi_lo_no_truncado <- max(0, pi_lo_no)
+pi_lo_si_truncado <- max(0, pi_lo_si)
+premium     <- pred_si - pred_no
+premium_pct <- 100 * premium / pred_no
+
+# ---- Ingreso anual con supuesto 55% ocupación ----
+ocupacion_sup <- 0.55
+ingreso_anual_sin <- pred_no * 365 * ocupacion_sup
+ingreso_anual_con <- pred_si * 365 * ocupacion_sup
+diferencia_anual <- ingreso_anual_con - ingreso_anual_sin
+
+# ---- Lista r8 para inline R ----
+r8 <- list(
+  fecha_corte_iso = fecha_corte_iso,
+  n               = nrow(roma),
+  # Coeficientes M3
+  b0   = round(b0, 0),
+  b_bd = round(b_bd, 0),
+  b_ac = round(b_ac, 0),
+  b_sh = round(b_sh, 0),
+  r2_m3   = round(res_m3$r.squared, 3),
+  r2aj_m3 = round(res_m3$adj.r.squared, 3),
+  rse_m3  = round(res_m3$sigma, 0),
+  # Diagnóstico
+  cor_het         = round(cor_het, 3),
+  asimetria       = round(asimetria_aux, 2),
+  kurtosis        = round(kurtosis_aux, 2),
+  n_outliers      = n_outliers_std,
+  pct_outliers    = round(pct_outliers, 1),
+  cook_max        = round(cook_max, 4),
+  # VIFs
+  vif_bd          = round(vif_bd, 2),
+  vif_ac          = round(vif_ac, 2),
+  vif_sh          = round(vif_sh, 2),
+  # Comparación
+  r2aj_simple = round(summary(modelo_simple_aux)$adj.r.squared, 3),
+  r2aj_m2     = round(summary(modelo_2vars_aux)$adj.r.squared,  3),
+  r2aj_alt    = round(summary(modelo_alt_aux)$adj.r.squared,    3),
+  # Predicciones Patricia
+  pred_no   = round(pred_no, 0),
+  pred_si   = round(pred_si, 0),
+  pi_lo_no_crudo = round(pi_lo_no, 0),
+  pi_lo_no_trunc = round(pi_lo_no_truncado, 0),
+  pi_hi_no  = round(pi_hi_no, 0),
+  pi_lo_si_trunc = round(pi_lo_si_truncado, 0),
+  pi_hi_si  = round(pi_hi_si, 0),
+  premium   = round(premium, 0),
+  premium_pct = round(premium_pct, 1),
+  # Ingreso anual
+  ocup_sup    = round(100 * ocupacion_sup),
+  noches_anio = round(365 * ocupacion_sup),
+  ingreso_sin = round(ingreso_anual_sin, 0),
+  ingreso_con = round(ingreso_anual_con, 0),
+  dif_anual   = round(diferencia_anual, 0)
+)
+```
+
+# Recap + estructura del cierre {background-color="#2C3E50"}
+
+## Lo que llevamos con [Patricia]{.patricia} {.smaller}
+
+**Sesiones 1-3** — Pruebas: t una muestra · t/z dos muestras · ANOVA · χ². Aprendimos a comparar grupos.
+
+**Sesiones 4-6** — Modelo simple. Construcción · auditoría con depuración del atípico de \$81k · interpretación con CI vs PI · sembrar causalidad.
+
+**Sesión 7** — Modelo múltiple. Resolvimos las dos historias (β_bedrooms cae 35% al controlar por capacidad). Vimos el costo del acoplamiento sin nombrarlo.
+
+::: {.callout-note}
+**Hoy** — Cerramos el ciclo. Auditamos M3, formalizamos la conversación de redundancia entre variables, decidimos el modelo final, y entregamos a Patricia la recomendación profesional.
+:::
+
+## La pregunta más decisiva de [Patricia]{.patricia} {.smaller}
+
+> *"Entrega final: necesito un modelo que pueda **defender** y una recomendación **concreta** sobre cómo listar el departamento. Quiero saber qué tan en serio puedo tomar los rangos que me dieron. Y quiero un memo que pueda llevar a mi asesor financiero."*
+
+::: {.callout-warning appearance="minimal"}
+La pregunta no es solo "¿cuánto?". Es **"¿qué tan en serio puedo tomar lo que me das?"**. Esa es la pregunta que cierra cualquier proyecto de consultoría seria.
+:::
+
+## Estructura del cierre {.smaller}
+
+Cuatro preguntas que hoy resolvemos:
+
+1. **¿M3 es internamente coherente?** → diagnóstico de supuestos
+2. **¿La redundancia entre `bedrooms` y `accommodates` es problemática?** → multicolinealidad y VIF
+3. **¿M3 es la mejor elección?** → comparación de candidatos
+4. **¿Qué entregamos a Patricia?** → caso integrador y memo final
+
+# Diagnóstico de supuestos en M3 {background-color="#18BC9C"}
+
+## Los 4 supuestos releídos para múltiple {.smaller}
+
+| Supuesto | Cómo se ve en múltiple |
+|---|---|
+| Linealidad | El ajustado depende de varias variables — la línea LOWESS lee la combinación |
+| Homocedasticidad | La varianza no debe crecer con el ajustado (que es un compuesto) |
+| Independencia | Cada listing es un anuncio distinto — sigue asumido |
+| Normalidad | Q-Q sobre los residuos del modelo |
+
+::: {.callout-note appearance="minimal"}
+A diferencia de S5 (donde `bedrooms` discreta producía bandas verticales), aquí los plots se ven más como nubes continuas — el ajustado combina las 3 variables.
+:::
+
+## Plot 1 — Residuals vs Fitted {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+plot(modelo, which = 1)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+plot(modelo, which = 1)
+```
+
+:::
+
+**Qué buscamos.** Línea LOWESS plana sobre cero (linealidad) y dispersión similar a lo largo del eje (homocedasticidad).
+
+**Qué encontramos.** Linealidad razonable, pero la **dispersión crece notablemente con el valor ajustado** — heterocedasticidad clara.
+
+## Heterocedasticidad cuantificada {.smaller}
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 5
+ggplot(df_diag_aux, aes(x = ajustado, y = abs_resid)) +
+  geom_point(alpha = 0.3, color = "#18BC9C") +
+  geom_smooth(method = "lm", se = FALSE, color = "#E74C3C") +
+  scale_x_continuous(labels = label_comma()) +
+  scale_y_continuous(labels = label_comma()) +
+  labs(x = "Valor ajustado (MXN)", y = "|residuo| (MXN)",
+       title = paste0("cor(|residuo|, ajustado) = ", round(cor_het, 3)),
+       subtitle = "Pendiente positiva clara: el modelo es menos preciso para predicciones altas") +
+  theme_curso()
+```
+
+::: {.callout-warning}
+**cor = `r r8$cor_het` es violación severa.** Implicación: los IC y PI formales **subestiman la incertidumbre real**. La banda razonable de incertidumbre es probablemente más amplia que la que el modelo reporta.
+:::
+
+## Plot 2 — Q-Q (normalidad) {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+plot(modelo, which = 2)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+plot(modelo, which = 2)
+```
+
+:::
+
+```{r}
+#| echo: false
+cat(sprintf("Asimetría residual: %.2f  (debe ser ~0)\n", asimetria_aux))
+cat(sprintf("Kurtosis exceso:    %.2f  (debe ser ~0 para normal)\n", kurtosis_aux))
+```
+
+**Cola derecha pesada** — distribución residual lejos de normal. Suma a la subestimación de incertidumbre por heterocedasticidad.
+
+## Plot 3 — Scale-Location {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+plot(modelo, which = 3)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+plot(modelo, which = 3)
+```
+
+:::
+
+Línea roja con **pendiente positiva clara** — confirma la heterocedasticidad cuantificada con la métrica anterior.
+
+## Plot 4 — Residuals vs Leverage {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.40em;"}
+```{.r}
+plot(modelo, which = 5)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+#| fig-width: 9
+#| fig-height: 5
+plot(modelo, which = 5)
+```
+
+:::
+
+::: {.callout-note appearance="minimal"}
+Las curvas punteadas son contornos de **distancia de Cook** (Cook's distance) — métrica clásica de influencia individual. La nombramos hoy (última sesión) para cerrar vocabulario. Distancia de Cook máxima en M3: **`r format(r8$cook_max, nsmall = 4)`** — bien por debajo del umbral preocupante de 0.5. **Sin alarma.**
+:::
+
+## Veredicto del diagnóstico {.smaller}
+
+| Supuesto | Severidad |
+|---|---|
+| Linealidad | 🟢 Razonable |
+| **Homocedasticidad** | 🔴 **Violación clara (cor = `r r8$cor_het`)** |
+| Independencia | 🟢 Asumida |
+| **Normalidad de residuales** | 🟠 **Cola pesada (asim `r r8$asimetria`, kurt `r r8$kurtosis`)** |
+| Influencia individual | 🟢 Sin alarma |
+
+::: {.callout-important}
+**Lectura honesta para Patricia.** Las violaciones son graves. El modelo da **dirección útil** (signos y órdenes de magnitud robustos), pero los **rangos formales son optimistas**. Hay que comunicarlo.
+:::
+
+# Multicolinealidad y VIF {background-color="#2C3E50"}
+
+## El nombre técnico al fenómeno de S7 {.smaller}
+
+En S7 vimos: agregar `accommodates` al modelo infló el SE de `bedrooms` 2× sin que R² mejorara casi nada. Le dimos un nombre informal: *"costo del acoplamiento"*.
+
+El nombre técnico es **multicolinealidad**: dos o más predictoras contienen información redundante, y el modelo no puede separar bien sus efectos individuales.
+
+::: {.callout-note}
+La métrica estándar para cuantificarla es el **VIF** (Variance Inflation Factor). Es lo que vamos a calcular ahora.
+:::
+
+## VIF — definición y regla de pulgar {.smaller}
+
+Para cada predictora $X_j$:
+
+$$\text{VIF}_j = \frac{1}{1 - R^2_j}$$
+
+donde $R^2_j$ es el coeficiente de regresar $X_j$ contra **todas las demás predictoras**.
+
+**Lectura.** Si $X_j$ es muy predecible desde las otras → $R^2_j$ alto → $\text{VIF}_j$ alto → la información de $X_j$ ya estaba en las otras.
+
+| VIF | Lectura |
+|---|---|
+| < 5 | OK |
+| 5 - 10 | Marginal, vigilar |
+| > 10 | Problemático |
+
+## VIF en M3 {.smaller}
+
+::: {.panel-tabset}
+
+## 💻 Código
+
+::: {style="font-size: 1.20em;"}
+```{.r}
+# VIF para bedrooms
+mod_vif <- lm(bedrooms ~ accommodates + superhost,
+              data = roma)
+vif_bd <- 1 / (1 - summary(mod_vif)$r.squared)
+```
+:::
+
+## 📊 Resultado
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Variable = c("bedrooms", "accommodates", "superhost"),
+  VIF      = c(round(vif_bd, 2), round(vif_ac, 2), round(vif_sh, 2)),
+  Lectura  = c(
+    ifelse(vif_bd < 5, "OK", ifelse(vif_bd < 10, "Marginal", "Problemática")),
+    ifelse(vif_ac < 5, "OK", ifelse(vif_ac < 10, "Marginal", "Problemática")),
+    ifelse(vif_sh < 5, "OK", ifelse(vif_sh < 10, "Marginal", "Problemática"))
+  )
+) |>
+  knitr::kable(align = "lrl")
+```
+
+:::
+
+::: {.callout-note}
+**Veredicto:** VIF de bedrooms y accommodates ≈ `r r8$vif_bd` cada uno (simétrico — son intercambiables en su rol). **Borderline pero técnicamente OK.** El "costo del acoplamiento" de S7 ahora tiene nombre y métrica — y está dentro de tolerancia.
+:::
+
+# ¿Cuál es nuestro modelo final? {background-color="#18BC9C"}
+
+## Comparación de candidatos {.smaller}
+
+```{r}
+#| echo: false
+tibble::tibble(
+  Modelo = c("M_simple (bedrooms)",
+             "M2 (b + acc)",
+             "M_alt (b + sh)",
+             "M3 (b + acc + sh)"),
+  k     = c(1, 2, 2, 3),
+  R2_aj = c(sprintf("%.3f", r8$r2aj_simple),
+            sprintf("%.3f", r8$r2aj_m2),
+            sprintf("%.3f", r8$r2aj_alt),
+            sprintf("%.3f", r8$r2aj_m3)),
+  VIF_max = c("1.0", sprintf("%.1f", r8$vif_bd), "1.0", sprintf("%.1f", r8$vif_bd))
+) |>
+  knitr::kable(align = "lrrr",
+               col.names = c("Modelo", "k", "R² aj", "VIF máx"))
+```
+
+::: {.incremental}
+- M3 tiene el R² aj más alto, pero apenas `r round(100*(r8$r2aj_m3 - r8$r2aj_alt), 1)` pp sobre M_alt.
+- M_alt está libre de multicolinealidad (VIF = 1.0).
+- **La decisión no es algorítmica. Es de juicio.**
+:::
+
+## Decisión final: M3 {.smaller}
+
+::: {.callout-note}
+**Mantenemos M3 como modelo final.**
+
+Justificación: la mejora marginal en R² aj (`r r8$r2aj_m3` vs `r r8$r2aj_alt`) **y la capacidad de interpretar el efecto de bedrooms manteniendo la capacidad constante** valen el VIF borderline.
+
+**M_alt sería una alternativa también defendible** para un analista que priorice parsimonia. Ambas son técnicamente válidas. La elección depende del objetivo: aquí queremos interpretación condicional (lo que se sembró desde S6), no solo predicción.
+:::
+
+::: {.callout-warning appearance="minimal"}
+**Para Patricia**: cuando le preguntemos qué historia preferimos contarle del mercado, M3 dice *"recámaras y capacidad pesan separadamente, ambas matter"*. M_alt diría *"recámaras es la palanca observable, capacidad va de pasajera"*. Eligiendo M3 le damos la versión más rica.
+:::
+
+# Caso integrador {background-color="#2C3E50"}
+
+## Las 3 decisiones encadenadas de [Patricia]{.patricia} {.smaller}
+
+| # | Pregunta | ¿Lo respondemos? |
+|---|---|---|
+| 1 | ¿Listar en Airbnb o renta tradicional? | **No** — fuera de scope (otro dataset) |
+| 2 | Si Airbnb, ¿a qué precio? | **Sí** — predicción central + rango defendible |
+| 3 | ¿Qué ingreso anual proyectar? | **Sí** — con supuesto declarado de ocupación |
+
+## Memo final · Parte A {.smaller}
+
+::: {.callout-note appearance="minimal"}
+**Para: Patricia Domínguez**
+**Asunto: Recomendación final — modelo de precio para su depto en Roma Norte**
+
+**Resumen ejecutivo.** Con base en `r format(r8$n, big.mark = ",")` listings de propiedades completas en Roma Norte, su precio defendible para 2 recámaras / 4 personas está en **\$`r format(r8$pi_lo_no_trunc, big.mark = ",")` a \$`r format(r8$pi_hi_no, big.mark = ",")` MXN/noche** (predicción central \$`r format(r8$pred_no, big.mark = ",")`). Si logra superhost: predicción central +\$`r format(r8$premium, big.mark = ",")` MXN/noche.
+
+**Decisión 1 — ¿Airbnb o renta tradicional?** No la respondemos con nuestros datos. Resolverla requiere una base de **comparables de renta tradicional** en Roma Norte (precio mensual, ocupación, costos). Esa información no es pública en una sola fuente; habría que construirla con un **web scraper** sobre portales como Inmuebles24, Mercado Libre Inmuebles o Lamudi. Es un proyecto en sí mismo, fuera del alcance de esta consultoría.
+
+**Decisión 2 — ¿A qué precio listar?** Predicción central \$`r format(r8$pred_no, big.mark = ",")` MXN/noche; rango defendible (95%, truncado en 0): **\$`r format(r8$pi_lo_no_trunc, big.mark = ",")` a \$`r format(r8$pi_hi_no, big.mark = ",")`**. **Use el rango, no la predicción puntual.** Cada recámara adicional (manteniendo capacidad constante): +\$`r format(r8$b_bd, big.mark = ",")` MXN/noche. Cada persona adicional de capacidad: +\$`r format(r8$b_ac, big.mark = ",")`. Superhost: +\$`r format(r8$b_sh, big.mark = ",")`.
+:::
+
+## Memo final · Parte B {.smaller}
+
+::: {.callout-note appearance="minimal"}
+**Decisión 3 — ¿Cuál es el ingreso anual esperable?** Asumiendo ocupación de **`r r8$ocup_sup`%** (`r r8$noches_anio` noches/año reservadas; valor razonable para Roma Norte, a refinar con datos propios después de 3-6 meses): **\$`r format(r8$ingreso_sin, big.mark = ",")` MXN/año** sin superhost; **\$`r format(r8$ingreso_con, big.mark = ",")` MXN/año** con superhost. Diferencia atribuible a la certificación: ~\$`r format(r8$dif_anual, big.mark = ",")` MXN/año.
+
+**Acciones operativas con prioridad.**
+
+1. **Buscar la certificación de superhost** durante el primer año. El premium (~\$`r format(r8$dif_anual, big.mark = ",")`/año) hace que el esfuerzo (responsividad, tasa de aceptación, evitar cancelaciones) tenga retorno claro.
+2. **Considerar capacidad efectiva**, no solo recámaras. Un sofá-cama que aumente accommodates de 4 a 5 captura ~\$`r format(r8$b_ac, big.mark = ",")`/noche sin obra física.
+3. **Optimizar señales de calidad** — fotos profesionales, descripción, primeras reseñas. Variables que el modelo no incluye pero que la literatura indica que mueven precios.
+
+**Caveats explícitos.** Heterocedasticidad severa → rangos formales optimistas. Modelo NO establece causalidad. Variables omitidas: m², ubicación específica, calidad del decorado, antigüedad.
+
+**Próximos pasos.** Re-evaluar con datos propios después del primer trimestre. Para profundización: enriquecer con datos georreferenciados (próxima slide).
+:::
+
+# Cierre del Parcial 3 {background-color="#18BC9C"}
+
+## Veredicto del modelo final {.smaller}
+
+::: {.callout-note}
+**M3 es nuestro modelo final.** Es estadísticamente robusto en signos y magnitudes, con multicolinealidad borderline pero técnicamente aceptable. Las violaciones de homocedasticidad y normalidad lo limitan: **da dirección útil pero los rangos formales subestiman incertidumbre real**.
+
+**Para Patricia**: rango defendible \$`r format(r8$pi_lo_no_trunc, big.mark = ",")` a \$`r format(r8$pi_hi_no, big.mark = ",")` MXN/noche; ingreso anual proyectado \$`r format(r8$ingreso_sin, big.mark = ",")` (con ocupación supuesta `r r8$ocup_sup`%). Premium superhost: \$`r format(r8$premium, big.mark = ",")`/noche.
+:::
+
+## Lo que este modelo NO incluye {.smaller}
+
+::: {.callout-important}
+- **Tamaño en m²** — Inside Airbnb no expone esto consistentemente.
+- **Ubicación específica** dentro de Roma Norte (calle, cuadra, esquina). Tratamos a Roma Norte como bloque homogéneo.
+- **Calidad del decorado, fotos, descripción** — variables de presentación que mueven precios.
+- **Reseñas y rating** — historial de calidad.
+- **Variables del entorno** — proximidad a transporte, restaurantes, ruido, seguridad, comercio.
+- **Variables temporales** — estacionalidad, eventos, día de la semana.
+:::
+
+## Cómo mejorar el modelo: enriquecer con datos externos {.smaller}
+
+El precio de un Airbnb depende de mucho que el dataset no tiene. Cruzar con otras fuentes lo transforma:
+
+::: {.incremental}
+- **Censo INEGI** a nivel manzana / AGEB → ingreso medio del entorno, escolaridad, edad, densidad, marginación
+- **Distancias geográficas** → metro, metrobús, mercados, centros comerciales, parques, puntos turísticos
+- **Tipología vial** (DENUE, OpenStreetMap) → primaria/secundaria, peatonal, ruido esperado
+- **Web scraping** para datos no abiertos: precios de competidores, eventos cercanos
+:::
+
+**Lo que se necesita técnicamente**: geocoding (direcciones a lat/long), joins espaciales con cartografía oficial (`sf`, `tigris`, `osmdata`), web scraping cuando la fuente no es API abierta.
+
+## Pero la geografía agrega supuestos {.smaller}
+
+Cuando los datos están en el espacio, OLS necesita más:
+
+| OLS clásico | Versión espacial |
+|---|---|
+| Independencia | **No autocorrelación espacial** — residuos vecinos no deben ser similares (I de Moran) |
+| Linealidad | **Estacionariedad** — el efecto no varía en el espacio |
+| — | **Soporte consistente** — datos del AGEB aplican a todos los listings de ese AGEB |
+
+::: {.callout-warning}
+**Tobler's First Law**: *"near things are more related than distant things"*. Listings vecinos comparten ruido, prestigio, comercio. Si lo ignoramos, los SE están subestimados → falsa precisión.
+
+**Modelos formales**: SAR, SEM, GWR. Paquetes: `spdep`, `spatialreg`, `GWmodel`. Más allá del semestre — el camino natural si quieren profundizar.
+:::
+
+## El arco que recorrimos {.smaller}
+
+| Sesión | Pregunta de [Patricia]{.patricia} | Herramienta clave |
+|---|---|---|
+| **S1** | ¿Es real que el promedio es \$1,800? | t una muestra |
+| **S2** | ¿Cobro más completo o por cuarto? ¿Superhost? | t/z dos muestras + proporciones |
+| **S3** | ¿Roma vs Condesa vs Polanco vs Del Valle? | ANOVA + χ² |
+| **S4** | ¿Cómo paso de comparar a estimar un precio? | `lm` simple |
+| **S5** | ¿Puedo confiar en este modelo? | Diagnóstico + auditoría de datos |
+| **S6** | ¿Cuál es el rango defendible? ¿Es causal? | CI vs PI + omitted variable |
+| **S7** | ¿Y si controlo por varias cosas? | `lm` múltiple + dummies |
+| **S8** | Entrega final defendible | VIF + diagnóstico + memo |
+
+## El principio que cierra el semestre {background-color="#2C3E50" .smaller}
+
+> **"La pregunta la haces tú.**
+>
+> **La ejecución puede asistirla la IA.**
+>
+> **La verificación y la decisión son intransferibles."**
+
+::: {.callout-note appearance="minimal"}
+Lo que aprendieron a hacer en este Parcial 3 es exactamente eso: **formular preguntas pertinentes**, **ejecutar los cálculos con criterio**, **verificar honestamente** los resultados y sus límites, y **comunicar a un tomador de decisiones** lo que se puede y no se puede afirmar.
+
+Eso es el oficio. Las herramientas cambian. El oficio no.
+:::
